@@ -244,6 +244,8 @@ function makeMap(el, zoom = 13) {
   return m;
 }
 const driverIcon = (d, busy) => L.divIcon({ className: "", html: `<div class="drv-pin ${!d.online ? "off" : busy ? "busy" : ""}">${esc((d.name || "س").trim()[0])}</div>`, iconSize: [30, 30], iconAnchor: [15, 15] });
+const BIZ = { restaurant: { label: "المطعم", icon: "🍽" }, shop: { label: "المحل", icon: "🏪" }, page: { label: "البيج", icon: "📱" } };
+const bizLabel = (r) => { const b = BIZ[r?.biz_type] || BIZ.restaurant; return `${b.icon} ${b.label.replace(/^ال/, "")}`; };
 const restIcon = () => L.divIcon({ className: "", html: `<div class="rest-pin">🍽</div>`, iconSize: [26, 26], iconAnchor: [13, 13] });
 const DCOLORS = ["#E8590C", "#1971C2", "#2F9E44", "#AE3EC9", "#E03131", "#0C8599", "#F08C00", "#5F3DC4", "#C2255C", "#5C940D", "#364FC7", "#862E9C"];
 function driverColor(id) {
@@ -1158,11 +1160,11 @@ const Admin = {
   renderRestaurants() {
     const rs = S.people.filter((p) => p.role === "restaurant" && !p.removed_at);
     const today = S.orders.filter((o) => o.created_at >= startOfToday());
-    $("#amain").innerHTML = `<div class="spread"><h2 style="margin:0">المطاعم والمحلات (${rs.length})</h2><button class="btn primary" data-act="addUser" data-role="restaurant">+ مطعم جديد</button></div>
+    $("#amain").innerHTML = `<div class="spread"><h2 style="margin:0">المطاعم والمحلات والبيجات (${rs.length})</h2><button class="btn primary" data-act="addUser" data-role="restaurant">+ حساب جديد</button></div>
       <div class="card table-wrap" style="margin-top:12px;padding:0">
       <table><thead><tr><th>الاسم</th><th>الرقم</th><th>العنوان</th><th>الموقع</th><th>طلبات اليوم</th><th></th></tr></thead><tbody>
       ${rs.map((r) => `<tr>
-        <td><b>${esc(r.name)}</b>${!r.active ? ` <span class="chip st-cancelled">موقوف</span>` : ""}</td>
+        <td><b>${esc(r.name)}</b>${!r.active ? ` <span class="chip st-cancelled">موقوف</span>` : ""}<div class="small muted">${bizLabel(r)}</div></td>
         <td>${tel(r.phone)}</td>
         <td class="small">${esc(r.address || "—")}${r.zone_id ? ` · ${esc(zoneName(r.zone_id))}` : ""}</td>
         <td class="small">${r.lat != null ? `<button class="btn sm" data-act="restLoc" data-id="${r.id}">📍 شوف الموقع</button>` : `<span style="color:var(--warn)">⏳ بانتظار يحدده</span>`}</td>
@@ -1916,9 +1918,10 @@ const Admin = {
   },
   addUserModal(role) {
     const isR = role === "restaurant";
-    modal(`<h3>${isR ? "مطعم / محل جديد" : "سائق جديد"}</h3>
-      <form id="uForm">
-        <div class="field"><label>${isR ? "اسم المطعم" : "اسم السائق"}</label><input name="name" required></div>
+    modal(`<h3>${isR ? "حساب جديد (مطعم / محل / بيج)" : "سائق جديد"}</h3>
+      <form id="uForm" autocomplete="off">
+        ${isR ? `<div class="field"><label>النوع</label><div class="seg seg-wide" id="bizSeg">${Object.entries(BIZ).map(([k, v], i) => `<button type="button" class="${i === 0 ? "on" : ""}" data-biz="${k}">${v.icon} ${v.label}</button>`).join("")}</div><input type="hidden" name="biz_type" value="restaurant"></div>` : ""}
+        <div class="field"><label id="nameLbl">${isR ? "اسم المطعم" : "اسم السائق"}</label><input name="name" required autocomplete="off"></div>
         <div class="field"><label>رقم الموبايل (يستعمله للدخول)</label><input name="phone" type="tel" inputmode="tel" required></div>
         <div class="field"><label>الرمز (6 أحرف أو أكثر)</label><input name="password" class="ltr" required minlength="6" value="${Math.random().toString().slice(2, 8)}"></div>
         ${isR ? `<div class="field"><label>العنوان</label><input name="address"></div>
@@ -1928,6 +1931,13 @@ const Admin = {
         : `<div class="field"><label>نوع المركبة / رقمها (اختياري)</label><input name="vehicle"></div>`}
         <div class="row" style="flex-wrap:nowrap"><button class="btn primary" style="flex:1">إنشاء الحساب</button><button type="button" class="btn ghost" data-close>إلغاء</button></div>
       </form>`, (bg, close) => {
+      const bs = $("#bizSeg", bg);
+      if (bs) bs.onclick = (e) => {
+        const t = e.target.closest("[data-biz]"); if (!t) return;
+        bs.querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === t));
+        $("#uForm [name=biz_type]", bg).value = t.dataset.biz;
+        $("#nameLbl", bg).textContent = "اسم " + BIZ[t.dataset.biz].label;
+      };
       const findZone = (n) => S.zones.find((z) => z.name.trim() === String(n || "").trim());
       const zi = $("#uForm [name=zone_name]", bg);
       if (zi) zi.oninput = () => {
