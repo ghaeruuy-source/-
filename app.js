@@ -1682,13 +1682,28 @@ const Admin = {
     m.innerHTML = `
       <div class="card no-print stm-bar">
         <div class="seg"><button class="${S.stm.type === "driver" ? "on" : ""}" data-st="driver">🛵 سائق</button><button class="${S.stm.type === "restaurant" ? "on" : ""}" data-st="restaurant">🍽 مطعم</button></div>
-        <select id="sWho" style="flex:1;min-width:180px">${list.map((p) => `<option value="${p.id}" ${p.id === S.stm.id ? "selected" : ""}>${esc(p.name)}</option>`).join("") || `<option value="">ماكو</option>`}</select>
+        <input id="sFind" type="search" list="sAll" placeholder="🔍 ابحث باسم سائق أو مطعم أو رقمه" style="flex:1;min-width:200px" autocomplete="off">
+        <datalist id="sAll">${S.people.filter((p) => ["driver", "restaurant"].includes(p.role)).map((p) => `<option value="${esc(p.name)} · ${p.role === "driver" ? "سائق" : "مطعم"}">${esc(p.phone || "")}</option>`).join("")}</datalist>
+        <select id="sWho" style="flex:1;min-width:160px">${list.map((p) => `<option value="${p.id}" ${p.id === S.stm.id ? "selected" : ""}>${esc(p.name)}</option>`).join("") || `<option value="">ماكو</option>`}</select>
         <span class="row date-range"><input type="date" id="sFrom" value="${S.stm.from}" style="width:auto"> إلى <input type="date" id="sTo" value="${S.stm.to}" style="width:auto"></span>
         <button class="btn sm" onclick="window.print()">🖨 طباعة</button>
       </div>
       <div id="stmBody"><div class="spinner" style="margin:40px auto"></div></div>`;
     m.querySelectorAll("[data-st]").forEach((b) => (b.onclick = () => { S.stm.type = b.dataset.st; S.stm.id = ""; this.renderStatement(); }));
     $("#sWho").onchange = (e) => { S.stm.id = e.target.value; this.renderStatement(); };
+    $("#sFind").oninput = (e) => {
+      const q = e.target.value.trim().replace(/ · (سائق|مطعم)$/, ""); if (!q) return;
+      const pool = S.people.filter((p) => ["driver", "restaurant"].includes(p.role));
+      const hit = pool.find((p) => p.name === q || p.phone === normPhone(q))
+        || (e.inputType === "insertReplacementText" || !e.inputType ? pool.find((p) => p.name.includes(q)) : null);
+      if (hit) { S.stm.type = hit.role; S.stm.id = hit.id; this.renderStatement(); }
+    };
+    $("#sFind").onkeydown = (e) => {
+      if (e.key !== "Enter") return;
+      const q = e.target.value.trim().replace(/ · (سائق|مطعم)$/, "");
+      const hit = S.people.filter((p) => ["driver", "restaurant"].includes(p.role)).find((p) => p.name.includes(q) || (p.phone || "").includes(q));
+      if (hit) { S.stm.type = hit.role; S.stm.id = hit.id; this.renderStatement(); } else toast("ما لكيت أحد بهذا الاسم", true);
+    };
     $("#sFrom").onchange = (e) => { S.stm.from = e.target.value; this.renderStatement(); };
     $("#sTo").onchange = (e) => { S.stm.to = e.target.value; this.renderStatement(); };
     const body = $("#stmBody");
