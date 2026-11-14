@@ -202,9 +202,11 @@ body.live-mode #amain { position: fixed; top: var(--live-top, 120px); left: 0; r
 
 /* big map pins */
 .bpin { display: flex; flex-direction: column; align-items: center; width: 56px; }
-.bpin-c { position: relative; width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; font-size: 26px; color: #fff; border: 3px solid #fff; box-shadow: 0 3px 10px rgba(0,0,0,.35); background: var(--brand); }
-.bpin.busy .bpin-c { background: var(--info); }
-.bpin.off .bpin-c { background: #9a948d; opacity: .85; }
+.bpin-c { position: relative; width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; font-size: 26px; color: #fff; border: 3px solid #fff; box-shadow: 0 3px 10px rgba(0,0,0,.35); background: var(--dc, var(--brand)); }
+.bpin.busy .bpin-c { box-shadow: 0 0 0 4px color-mix(in srgb, var(--dc) 35%, transparent), 0 3px 10px rgba(0,0,0,.35); }
+.bpin.off .bpin-c { background: #9a948d; border-color: var(--dc); opacity: .85; }
+.bpin .bpin-l { border-bottom: 3px solid var(--dc, transparent); }
+.bpin-badge { color: var(--dc, var(--info)) !important; border-color: var(--dc, var(--info)) !important; }
 .bpin.rest .bpin-c { background: var(--ink); border-radius: 14px; width: 44px; height: 44px; font-size: 22px; }
 .bpin-badge { position: absolute; top: -8px; left: -10px; background: #fff; color: var(--info); border: 2px solid var(--info); border-radius: 999px; font-size: 12px; font-weight: 700; padding: 0 6px; line-height: 18px; }
 .bpin-l { margin-top: 3px; background: rgba(255,255,255,.95); color: var(--ink); font-size: 12px; font-weight: 700; padding: 1px 7px; border-radius: 8px; white-space: nowrap; box-shadow: 0 1px 4px rgba(0,0,0,.2); max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
@@ -296,3 +298,7 @@ tr.tot td { border-top: 2px solid var(--ink); background: var(--surface-2); }
 .stm-grid .stm-opt { background: var(--surface); border: 1px solid var(--line); }
 .stm-period { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; border-top: 1px solid var(--line); padding-top: 12px; }
 .stm-head { align-items: center; }
+
+.ln { display: inline-block; width: 22px; height: 0; border-top: 4px solid var(--ink-2); margin-inline-start: 6px; vertical-align: middle; border-radius: 2px; }
+.ln.dash { border-top-style: dashed; }
+.cdot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-inline-end: 6px; vertical-align: middle; }

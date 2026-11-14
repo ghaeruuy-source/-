@@ -244,8 +244,15 @@ function makeMap(el, zoom = 13) {
 }
 const driverIcon = (d, busy) => L.divIcon({ className: "", html: `<div class="drv-pin ${!d.online ? "off" : busy ? "busy" : ""}">${esc((d.name || "س").trim()[0])}</div>`, iconSize: [30, 30], iconAnchor: [15, 15] });
 const restIcon = () => L.divIcon({ className: "", html: `<div class="rest-pin">🍽</div>`, iconSize: [26, 26], iconAnchor: [13, 13] });
-const bigDriverIcon = (d, on, bo) => L.divIcon({ className: "", iconSize: [56, 70], iconAnchor: [28, 28], popupAnchor: [0, -26],
-  html: `<div class="bpin ${!on ? "off" : bo ? "busy" : "free"}"><div class="bpin-c">🛵${bo ? `<span class="bpin-badge">#${bo.id}</span>` : ""}</div><div class="bpin-l">${esc(d.name)}</div></div>` });
+const DCOLORS = ["#E8590C", "#1971C2", "#2F9E44", "#AE3EC9", "#E03131", "#0C8599", "#F08C00", "#5F3DC4", "#C2255C", "#5C940D", "#364FC7", "#862E9C"];
+function driverColor(id) {
+  const ids = S.people?.filter((p) => p.role === "driver").map((p) => p.id) || [];
+  let i = ids.indexOf(id);
+  if (i < 0) { i = 0; for (const ch of String(id)) i = (i * 31 + ch.charCodeAt(0)) >>> 0; }
+  return DCOLORS[i % DCOLORS.length];
+}
+const bigDriverIcon = (d, on, bo) => { const c = driverColor(d.id); return L.divIcon({ className: "", iconSize: [56, 70], iconAnchor: [28, 28], popupAnchor: [0, -26],
+  html: `<div class="bpin ${!on ? "off" : bo ? "busy" : "free"}" style="--dc:${c}"><div class="bpin-c">🛵${bo ? `<span class="bpin-badge">#${bo.id}</span>` : ""}</div><div class="bpin-l">${esc(d.name)}</div></div>` }); };
 const bigRestIcon = (r) => L.divIcon({ className: "", iconSize: [56, 64], iconAnchor: [28, 22], popupAnchor: [0, -20],
   html: `<div class="bpin rest"><div class="bpin-c">🍽</div><div class="bpin-l">${esc(r.name)}</div></div>` });
 
@@ -825,7 +832,7 @@ const Admin = {
     // forms shouldn't be wiped by realtime updates
     if (soft && ["settings", "zones", "flagged", "accounts", "orders", "reports", "vouchers", "daily", "users", "statement"].includes(S.tab) && m.dataset.view === S.tab) return;
     document.body.classList.toggle("live-mode", S.tab === "map");
-    if (S.tab !== "map" && S.maps.admin) { S.maps.admin.remove(); S.maps.admin = null; S.markers = {}; S.fitted = false; }
+    if (S.tab !== "map" && S.maps.admin) { S.maps.admin.remove(); S.maps.admin = null; S.markers = {}; S.lines = {}; S.fitted = false; }
     m.dataset.view = S.tab;
     m.classList.toggle("wide", S.tab === "live");
     if (S.tab === "live") return this.renderLive();
@@ -875,7 +882,7 @@ const Admin = {
     const m = $("#amain");
     if (!S.maps.admin) {
       m.innerHTML = `<div class="live"><div class="map-full" id="adminMap"></div><div class="float-stats" id="liveStats"></div></div>`;
-      S.maps.admin = makeMap($("#adminMap"), 14); S.markers = {}; S.fitted = false;
+      S.maps.admin = makeMap($("#adminMap"), 14); S.markers = {}; S.lines = {}; S.fitted = false;
       S.maps.admin.zoomControl.setPosition("bottomleft");
       this.fitLive();
     }
@@ -883,7 +890,7 @@ const Admin = {
     $("#liveStats").innerHTML = `
       <div class="fstat"><b class="num">${n.active.length}</b><span>طلبات نشطة</span></div>
       <div class="fstat"><b class="num">${n.online.length}</b><span>سائق متصل</span></div>
-      <div class="fstat legend"><i class="lg free"></i>فاضي <i class="lg busy"></i>عنده طلب <i class="lg off"></i>مطفي</div>`;
+      <div class="fstat legend">كل سائق بلونه · <i class="ln dash"></i>رايح للمطعم <i class="ln"></i>استلم الطلب <i class="lg off"></i>مطفي</div>`;
     this.updateMap();
     if (S.focusOrder) {
       const o = S.orders.find((x) => x.id === S.focusOrder); S.focusOrder = null;
@@ -985,6 +992,21 @@ const Admin = {
       if (S.markers[k]) S.markers[k].setLatLng([d.lat, d.lng]).setIcon(icon).setPopupContent(pop).setZIndexOffset(bo ? 1000 : on ? 500 : 0);
       else S.markers[k] = L.marker([d.lat, d.lng], { icon, zIndexOffset: bo ? 1000 : on ? 500 : 0 }).bindPopup(pop).addTo(map);
     });
+    // line restaurant <-> driver for every accepted order, in the driver's color
+    S.lines ||= {};
+    const keep = {};
+    Object.values(busyOrder).forEach((o) => {
+      const d = S.drivers[o.driver_id], r = S.restaurants[o.restaurant_id];
+      const rl = o.pickup_lat != null ? [o.pickup_lat, o.pickup_lng] : r?.lat != null ? [r.lat, r.lng] : null;
+      if (!d || d.lat == null || !rl) return;
+      keep[o.id] = 1;
+      const pts = [rl, [d.lat, d.lng]], c = driverColor(d.id), toRest = o.status === "accepted";
+      const style = { color: c, weight: 5, opacity: 0.9, dashArray: toRest ? "10 10" : null, lineCap: "round" };
+      const tip = `#${o.id} · ${esc(d.name)} ${toRest ? "رايح للمطعم" : "استلم الطلب"}`;
+      if (S.lines[o.id]) { S.lines[o.id].setLatLngs(pts).setStyle(style); S.lines[o.id].setTooltipContent(tip); }
+      else S.lines[o.id] = L.polyline(pts, style).bindTooltip(tip, { sticky: true }).addTo(map);
+    });
+    Object.keys(S.lines).forEach((id) => { if (!keep[id]) { S.lines[id].remove(); delete S.lines[id]; } });
     Object.values(S.restaurants).forEach((r) => {
       if (r.lat == null || S.markers["r" + r.id]) return;
       S.markers["r" + r.id] = L.marker([r.lat, r.lng], { icon: bigRestIcon(r) }).bindPopup(`<b>${esc(r.name)}</b><br>${tel(r.phone)}`).addTo(map);
@@ -1007,7 +1029,7 @@ const Admin = {
       <table><thead><tr><th>الاسم</th><th>الرقم</th><th>الحالة</th><th>الدين</th><th>توصيلات</th><th></th></tr></thead><tbody>
       ${ds.map((d) => { const b = S.balances?.[d.id] || {}; const debt = Number(b.debt || 0);
         return `<tr>
-        <td><b>${esc(d.name)}</b>${d.vehicle ? `<div class="small muted">${esc(d.vehicle)}</div>` : ""}</td>
+        <td><i class="cdot" style="background:${driverColor(d.id)}"></i><b>${esc(d.name)}</b>${d.vehicle ? `<div class="small muted">${esc(d.vehicle)}</div>` : ""}</td>
         <td>${tel(d.phone)}</td>
         <td>${!d.active ? `<span class="chip st-cancelled">موقوف</span>` : d.online ? `<span class="chip st-delivered">متصل</span>` : `<span class="chip">مطفي</span>`}<div class="small muted">${ago(d.location_at)}</div></td>
         <td><b class="${debt > 0 ? "pos" : ""}">${money(debt)}</b>${cap && debt >= cap ? `<div class="small" style="color:var(--bad)">واصل الحد</div>` : ""}</td>
