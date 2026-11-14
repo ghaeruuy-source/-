@@ -114,6 +114,53 @@ function notify(title, body) {
     }
   } catch (_) {}
 }
+// ---------- web push ----------
+const urlB64 = (b) => { const p = "=".repeat((4 - (b.length % 4)) % 4); const r = atob((b + p).replace(/-/g, "+").replace(/_/g, "/")); return Uint8Array.from([...r].map((c) => c.charCodeAt(0))); };
+const Push = {
+  supported() { return "serviceWorker" in navigator && "PushManager" in window && "Notification" in window; },
+  isIOS() { return /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1); },
+  standalone() { return matchMedia("(display-mode: standalone)").matches || navigator.standalone === true; },
+  state() {
+    if (!this.supported()) return this.isIOS() && !this.standalone() ? "ios-install" : "unsupported";
+    return Notification.permission; // default | granted | denied
+  },
+  async enable(silent = false) {
+    if (!this.supported()) { if (!silent) toast(this.isIOS() ? "بالآيفون: ضيف التطبيق للشاشة الرئيسية أول، وافتحه منها" : "هذا المتصفح ما يدعم الإشعارات", true); return false; }
+    const perm = Notification.permission === "granted" ? "granted" : silent ? Notification.permission : await Notification.requestPermission();
+    if (perm !== "granted") { if (!silent) toast("لازم تسمح بالإشعارات من إعدادات المتصفح", true); return false; }
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64(C.vapidPublicKey) });
+    const j = sub.toJSON();
+    await rpc("save_push_subscription", { p_endpoint: j.endpoint, p_p256dh: j.keys.p256dh, p_auth: j.keys.auth, p_ua: navigator.userAgent.slice(0, 200) });
+    S.pushOn = true;
+    if (!silent) toast("الإشعارات تفعّلت ✓");
+    return true;
+  },
+  async refresh() { try { if (this.supported() && Notification.permission === "granted") await this.enable(true); } catch (_) {} },
+  async disable() {
+    try {
+      const reg = await navigator.serviceWorker?.getRegistration(); const sub = await reg?.pushManager?.getSubscription();
+      if (sub) { await sb.from("push_subscriptions").delete().eq("endpoint", sub.endpoint); await sub.unsubscribe(); }
+    } catch (_) {}
+    S.pushOn = false;
+  },
+  banner(who) {
+    const st = this.state();
+    if (st === "granted" || st === "unsupported") return "";
+    const why = who === "driver" ? "حتى يوصلك الطلب حتى لو التطبيق مسدود" : "حتى توصلك حالة الطلبات حتى لو التطبيق مسدود";
+    if (st === "ios-install") return `<div class="alert warn" style="margin-top:12px">${why}: اضغط زر المشاركة <b>⬆︎</b> ← <b>إضافة إلى الشاشة الرئيسية</b>، وافتح التطبيق من الأيقونة.</div>`;
+    if (st === "denied") return `<div class="alert bad" style="margin-top:12px">الإشعارات مسدودة. فعّلها من إعدادات المتصفح للموقع ${why}.</div>`;
+    return `<div class="alert info spread" style="margin-top:12px"><span>${why}</span><button class="btn sm dark" data-act="push">فعّل الإشعارات</button></div>`;
+  },
+};
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest('[data-act="push"]'); if (!b) return;
+  b.disabled = true;
+  const ok = await Push.enable().catch((err) => { toast(errMsg(err), true); return false; });
+  if (ok) b.closest(".alert")?.remove(); else b.disabled = false;
+});
+
 function modal(html, onMount) {
   const bg = document.createElement("div");
   bg.className = "modal-bg";
@@ -169,6 +216,7 @@ async function boot() {
   if (error || !prof) { await sb.auth.signOut(); return renderLogin("الحساب غير موجود، راجع الإدارة"); }
   if (!prof.active) { await sb.auth.signOut(); return renderLogin("حسابك موقوف، راجع الإدارة"); }
   S.profile = prof;
+  Push.refresh();
   const { data: zones } = await sb.from("zones").select("*").order("name");
   S.zones = zones || [];
   if (prof.role === "restaurant") return Restaurant.start();
@@ -227,6 +275,7 @@ function renderSetup() {
 async function logout() {
   if (S.profile?.role === "driver" && S.profile.online) { try { await rpc("driver_set_online", { p_online: false }); } catch (_) {} }
   Driver.stopGps?.();
+  await Push.disable();
   clearTimers();
   if (S.channel) sb.removeChannel(S.channel);
   Object.values(S.maps).forEach((m) => m?.remove?.());
@@ -311,7 +360,7 @@ const Restaurant = {
   },
   formHtml() {
     const noLoc = S.profile.lat == null;
-    return `
+    return `${Push.banner("restaurant").replace('margin-top:12px', 'margin-bottom:12px')}
     ${noLoc ? `<div class="alert warn" style="margin-bottom:12px">موقع المطعم غير محدد. حدده حتى نرسل أقرب سائق.<div style="margin-top:8px"><button class="btn sm dark" data-act="setloc">حدد موقعي هسه</button></div></div>` : ""}
     <form class="card" id="orderForm" autocomplete="off">
       <h2>طلب سائق جديد</h2>
@@ -511,12 +560,13 @@ const Driver = {
     const active = S.orders.filter((o) => o.driver_id === p.id && ["accepted", "picked_up", "on_the_way"].includes(o.status));
     const gps = S.gpsError ? `<span style="color:var(--bad)">${esc(S.gpsError)}</span>` : p.online ? `الموقع ينرسل · ${ago(p.location_at)}` : "مطفي، ما توصلك طلبات";
     return `
-      <div class="card online-toggle">
+      ${Push.banner("driver")}
+      <div class="card online-toggle" style="margin-top:12px">
         <div><div style="font-weight:700;font-size:18px">${p.online ? "متصل 🟢" : "غير متصل"}</div><div class="small muted" id="gpsInfo">${gps}</div></div>
         <button class="switch ${p.online ? "on" : ""}" data-act="toggle" aria-label="تشغيل/إطفاء"></button>
       </div>
       ${blocked ? `<div class="alert bad" style="margin-top:12px">ديونك وصلت ${money(debt)} (الحد ${money(cap)}). ما توصلك طلبات جديدة لحد ما تسدد للإدارة.</div>` : ""}
-      ${p.online ? `<div class="alert info small" style="margin-top:12px">خلي الصفحة مفتوحة والشاشة شغالة حتى يوصلك الطلب ويتحدث موقعك.</div>` : ""}
+      ${p.online ? `<div class="alert info small" style="margin-top:12px">${Push.state() === "granted" ? "إذا سديت التطبيق يوصلك إشعار بالطلب، بس موقعك يوقف يتحدث. الأفضل تخليه مفتوح وانت شغال." : "خلي الصفحة مفتوحة والشاشة شغالة حتى يوصلك الطلب ويتحدث موقعك."}</div>` : ""}
       ${offer ? this.offerHtml(offer) : ""}
       ${active.map((o) => this.activeHtml(o)).join("")}
       ${!offer && !active.length && p.online ? `<div class="card empty" style="margin-top:12px">بانتظار طلب... 🛵</div>` : ""}
@@ -584,6 +634,9 @@ const Driver = {
       <div class="card">${S.ledger.length ? S.ledger.map((l) => `<div class="ledger-item"><div>${esc(l.note || (l.kind === "settlement" ? "تسديد" : l.kind === "commission" ? "عمولة" : "تعديل"))}<div class="small muted">${dateTime(l.created_at)}</div></div><b class="${Number(l.amount) > 0 ? "pos" : "neg"}">${Number(l.amount) > 0 ? "+" : ""}${money(l.amount)}</b></div>`).join("") : `<div class="empty">ماكو حركات</div>`}</div>`;
   },
   tick() {
+    // keep ringing every 3 seconds while an offer is waiting
+    const off = this.currentOffer();
+    if (off && Math.round((new Date(off.offer_expires_at) - Date.now()) / 1000) % 3 === 0) beep();
     document.querySelectorAll("[data-cd]").forEach((el) => {
       const s = Math.max(0, Math.round((new Date(el.dataset.cd) - Date.now()) / 1000));
       el.textContent = s;
@@ -602,7 +655,7 @@ const Driver = {
       if (b.dataset.act === "toggle") {
         const on = !S.profile.online;
         if (on) {
-          try { if ("Notification" in window && Notification.permission === "default") await Notification.requestPermission(); } catch (_) {}
+          try { await Push.enable(Push.state() !== "default"); } catch (_) {}
           beep.ctx || beep(); // unlock audio on iOS with a user gesture
           const pos = await getPosition();
           await rpc("driver_location", { p_lat: pos.lat, p_lng: pos.lng });
