@@ -302,3 +302,15 @@ tr.tot td { border-top: 2px solid var(--ink); background: var(--surface-2); }
 .ln { display: inline-block; width: 22px; height: 0; border-top: 4px solid var(--ink-2); margin-inline-start: 6px; vertical-align: middle; border-radius: 2px; }
 .ln.dash { border-top-style: dashed; }
 .cdot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-inline-end: 6px; vertical-align: middle; }
+
+/* voucher form */
+.vhead { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin: -4px 0 14px; padding-bottom: 10px; border-bottom: 3px solid var(--ink); }
+.vhead.vt-receive { border-color: var(--ok); } .vhead.vt-spend { border-color: var(--bad); } .vhead.vt-pay { border-color: var(--ink); }
+.vhead .small { color: var(--ink-2); }
+.seg-wide { display: flex; flex-wrap: wrap; width: 100%; }
+.seg-wide button { flex: 1 1 auto; font-size: 14px; }
+.vlist { margin-top: 8px; max-height: 240px; overflow-y: auto; border: 1px solid var(--line); border-radius: 12px; padding: 4px; }
+.vpicked { display: flex; align-items: center; gap: 8px; border: 2px solid var(--ok); border-radius: 12px; padding: 2px 8px 2px 2px; background: var(--surface); }
+.vpicked .stm-opt { cursor: default; } .vpicked .stm-opt:hover { background: transparent; }
+.vamount { display: flex; gap: 10px; margin-top: 12px; }
+.big-amt { font-size: 22px !important; font-weight: 700; height: 54px; }

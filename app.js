@@ -1366,37 +1366,73 @@ const Admin = {
       : type === "pay" ? [["partner", "شريك (سحب)"], ["driver", "سائق"], ["employee", "موظف (سلفة)"], ["other", "جهة أخرى"]]
       : [["other", "جهة"], ["employee", "موظف (راتب)"]];
     const pt = pre.party_type || parties[0][0];
-    modal(`<h3>${VT[type]} جديد</h3>
-      <form id="vForm">
+    const debtOf = (id) => Number(S.balances?.[id]?.debt || 0);
+    modal(`<div class="vhead vt-${type}"><h3 style="margin:0">${VT[type]} جديد</h3><span class="small">${type === "receive" ? "فلوس داخلة للقاصة" : type === "spend" ? "مصروف ينزل من الأرباح" : "فلوس طالعة من القاصة"}</span></div>
+      <form id="vForm" class="vform">
+        <input type="hidden" name="party_type" value="${pt}"><input type="hidden" name="party_id" value="${esc(pre.party_id || "")}">
+        <label>${type === "receive" ? "استلمنا من" : type === "spend" ? "صرفنا إلى" : "دفعنا إلى"}</label>
+        <div class="seg seg-wide" id="ptSeg">${parties.map(([k, l]) => `<button type="button" data-pt="${k}" class="${k === pt ? "on" : ""}">${l}</button>`).join("")}</div>
+        <div id="pSel" style="margin-top:10px"></div>
         ${type === "spend" ? `<div class="field"><label>التبويب</label><select name="category" required>${S.cats.filter((c) => c.active || c.name === pre.category).map((c) => `<option ${c.name === (pre.category || "مصاريف عامة") ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select></div>` : ""}
-        <div class="field"><label>${type === "receive" ? "استلمنا من" : type === "spend" ? "صرفنا إلى" : "دفعنا إلى"}</label>
-          <select name="party_type">${parties.map(([k, l]) => `<option value="${k}" ${k === pt ? "selected" : ""}>${l}</option>`).join("")}</select></div>
-        <div class="field" id="pSel"></div>
-        <div class="row" style="flex-wrap:nowrap"><div class="field" style="flex:1"><label>المبلغ (د.ع)</label><input name="amount" inputmode="numeric" class="ltr" required value="${esc(pre.amount ?? "")}"></div>
+        <div class="vamount">
+          <div class="field" style="flex:1.4"><label>المبلغ (د.ع)</label><input name="amount" inputmode="numeric" class="ltr big-amt" required value="${esc(pre.amount ?? "")}" placeholder="0"></div>
           <div class="field" style="flex:1"><label>التاريخ</label><input type="date" name="date" value="${today}" required></div></div>
         <div id="amtWords" class="small muted" style="margin:-6px 0 10px"></div>
-        <div class="field"><label>البيان / ملاحظة</label><input name="note" placeholder="${type === "spend" ? "مثلاً: بانزين للسيارة" : ""}"></div>
-        <div class="row" style="flex-wrap:nowrap"><button class="btn ${type === "receive" ? "ok" : type === "spend" ? "bad" : "dark"}" style="flex:1">حفظ السند</button><button type="button" class="btn ghost" data-close>إلغاء</button></div>
+        <div class="field"><label>البيان / ملاحظة</label><input name="note" placeholder="${type === "spend" ? "مثلاً: بانزين للسيارة" : "اختياري"}"></div>
+        <div class="row" style="flex-wrap:nowrap"><button class="btn big ${type === "receive" ? "ok" : type === "spend" ? "bad" : "dark"}" style="flex:1">حفظ السند</button><button type="button" class="btn ghost" data-close>إلغاء</button></div>
       </form>`, (bg, close) => {
       const f = $("#vForm", bg);
-      const opts = (list, val) => list.map((x) => `<option value="${x.id}" ${String(x.id) === String(val) ? "selected" : ""}>${esc(x.name)}${x.extra || ""}</option>`).join("");
+      const listFor = (t) => t === "driver" ? drivers.map((d) => ({ id: d.id, name: d.name, sub: d.phone, badge: debtOf(d.id) > 0 ? `دينه ${Number(debtOf(d.id)).toLocaleString("en-US")}` : "ما عليه دين", hot: debtOf(d.id) > 0, ic: "🛵" }))
+        : t === "partner" ? S.partners.map((x) => ({ id: x.id, name: x.name, sub: x.share_percent != null ? `حصته ${x.share_percent}%` : "", ic: "🤝" }))
+        : t === "employee" ? S.employees.filter((e) => e.active).map((x) => ({ id: x.id, name: x.name, sub: [x.job, x.phone].filter(Boolean).join(" · "), badge: x.monthly_salary ? `راتبه ${Number(x.monthly_salary).toLocaleString("en-US")}` : "", ic: "👤" })) : [];
+      const LBL = { driver: "السائق", partner: "الشريك", employee: "الموظف" };
       const drawParty = () => {
         const t = f.party_type.value, box = $("#pSel", bg);
-        if (t === "driver") box.innerHTML = `<label>السائق</label><select name="party_id">${opts(drivers.map((d) => ({ id: d.id, name: d.name, extra: ` — دينه ${Number(S.balances?.[d.id]?.debt || 0).toLocaleString("en-US")}` })), pre.party_id)}</select>`;
-        else if (t === "partner") box.innerHTML = S.partners.length ? `<label>الشريك</label><select name="party_id">${opts(S.partners, pre.party_id)}</select>` : `<div class="alert warn small">ضيف الشركاء أول من تبويب الحسابات</div>`;
-        else if (t === "employee") box.innerHTML = S.employees.length ? `<label>الموظف</label><select name="party_id">${opts(S.employees.filter((e) => e.active), pre.party_id)}</select>` : `<div class="alert warn small">ضيف الموظفين أول من تبويب الحسابات</div>`;
-        else box.innerHTML = `<label>الاسم</label><input name="party_name" placeholder="${type === "receive" ? "من منو؟" : "لمنو؟"}" ${type === "spend" ? "" : "required"}>`;
-        if (t === "driver" && !f.amount.value) { const d = S.balances?.[f.party_id?.value]; if (d?.debt > 0 && type === "receive") f.amount.value = d.debt; }
+        bg.querySelectorAll("[data-pt]").forEach((b) => b.classList.toggle("on", b.dataset.pt === t));
+        if (t === "other") { f.party_id.value = ""; box.innerHTML = `<div class="field"><label>الاسم</label><input name="party_name" placeholder="${type === "receive" ? "من منو؟" : "لمنو؟"}" ${type === "spend" ? "" : "required"}></div>`; return; }
+        const items = listFor(t);
+        if (!items.length) { box.innerHTML = `<div class="alert warn small">ماكو ${LBL[t]}. ${t === "driver" ? "ضيفهم من تبويب السائقين" : "ضيفهم أول من تبويب الحسابات"}</div>`; return; }
+        const cur = items.find((x) => String(x.id) === String(f.party_id.value));
+        const row = (x) => `<button type="button" class="stm-opt" data-pid="${x.id}"><span class="stm-ic">${x.ic}</span><span class="stm-nm"><b>${esc(x.name)}</b><small>${esc(x.sub || "")}</small></span>${x.badge ? `<span class="chip ${x.hot ? "st-refused" : ""}">${esc(x.badge)}</span>` : ""}</button>`;
+        if (cur) {
+          box.innerHTML = `<div class="vpicked">${row(cur)}<button type="button" class="btn sm ghost" id="pChange">تغيير</button></div>
+            ${t === "driver" && type === "receive" && debtOf(cur.id) > 0 ? `<div class="row" style="margin:8px 0 0"><button type="button" class="btn sm" id="allDebt">كل الدين (${Number(debtOf(cur.id)).toLocaleString("en-US")})</button><button type="button" class="btn sm ghost" id="halfDebt">نصه</button></div>` : ""}`;
+          $("#pChange", box).onclick = () => { f.party_id.value = ""; drawParty(); };
+          const setAmt = (v) => { f.amount.value = v; words(); };
+          $("#allDebt", box) && ($("#allDebt", box).onclick = () => setAmt(debtOf(cur.id)));
+          $("#halfDebt", box) && ($("#halfDebt", box).onclick = () => setAmt(Math.round(debtOf(cur.id) / 2)));
+          return;
+        }
+        box.innerHTML = `<div class="stm-box"><span class="stm-glass">🔍</span><input id="pFind" type="search" autocomplete="off" placeholder="ابحث باسم ${LBL[t]}${t === "driver" ? " أو رقمه" : ""}…"></div>
+          <div class="vlist" id="pList"></div>`;
+        const inp = $("#pFind", box), list = $("#pList", box);
+        const draw = () => {
+          const q = inp.value.trim(), qp = q.replace(/[^0-9]/g, "");
+          const hits = items.filter((x) => !q || x.name.includes(q) || (qp.length >= 3 && String(x.sub || "").includes(qp)))
+            .sort((x, y) => (y.hot ? 1 : 0) - (x.hot ? 1 : 0));
+          list.innerHTML = hits.map(row).join("") || `<div class="empty" style="padding:12px">ما لكيت أحد</div>`;
+        };
+        inp.oninput = draw; draw();
+        inp.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); list.querySelector("[data-pid]")?.click(); } };
+        list.onclick = (e) => {
+          const b = e.target.closest("[data-pid]"); if (!b) return;
+          f.party_id.value = b.dataset.pid;
+          if (t === "driver" && type === "receive" && !toNum(f.amount.value) && debtOf(b.dataset.pid) > 0) { f.amount.value = debtOf(b.dataset.pid); words(); }
+          drawParty(); f.amount.focus();
+        };
+        setTimeout(() => inp.focus(), 50);
       };
-      f.party_type.onchange = drawParty; drawParty();
-      const words = () => ($("#amtWords", bg).textContent = toNum(f.amount.value) ? `كتابةً: ${numToWords(toNum(f.amount.value))}` : "");
-      f.amount.oninput = words; words();
+      $("#ptSeg", bg).onclick = (e) => { const b = e.target.closest("[data-pt]"); if (!b) return; f.party_type.value = b.dataset.pt; f.party_id.value = ""; drawParty(); };
+      function words() { $("#amtWords", bg).textContent = toNum(f.amount.value) ? `كتابةً: ${numToWords(toNum(f.amount.value))}` : ""; }
+      f.amount.oninput = words; drawParty(); words();
       f.onsubmit = async (e) => {
-        e.preventDefault(); const btn = f.querySelector("button"); btn.disabled = true;
+        e.preventDefault(); const btn = f.querySelector("button.big");
+        if (f.party_type.value !== "other" && !f.party_id.value) return toast("اختار الاسم من القائمة", true);
+        btn.disabled = true;
         try {
           const v = await rpc("create_voucher", {
             p_type: type, p_amount: toNum(f.amount.value), p_date: f.date.value, p_category: f.category?.value || null,
-            p_party_type: f.party_type.value, p_party_id: f.party_id?.value || null, p_party_name: f.party_name?.value || null,
+            p_party_type: f.party_type.value, p_party_id: f.party_id.value || null, p_party_name: f.party_name?.value || null,
             p_note: f.note.value || null, p_salary_month: pre.salary_month || null,
           });
           close(); toast(`انحفظ ${VT[type]} رقم ${v.number}`);
