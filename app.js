@@ -51,6 +51,7 @@ const STATUS = {
 };
 const PERMS = [["live", "الرئيسية"], ["map", "الخريطة"], ["drivers", "السائقين"], ["restaurants", "المطاعم"], ["orders", "كل الطلبات"], ["vouchers", "السندات"], ["daily", "الحركة اليومية"], ["boxes", "الصناديق"], ["accounts", "الحسابات"], ["reports", "التقارير"], ["statement", "كشف حساب"], ["zones", "المناطق والأجور"], ["flagged", "أرقام مرفوضة"], ["users", "المستخدمين والصلاحيات"], ["settings", "الإعدادات"]];
 const canTab = (k) => { const p = S.profile?.permissions; return !p || p.includes(k) || k === "live" && !p.length; };
+const bgDay = () => new Date(Date.now() + 3 * 3600e3).toISOString().slice(0, 10); // Baghdad date (UTC+3, no DST)
 const VT = { receive: "سند قبض", spend: "سند صرف", pay: "سند دفع" };
 function numToWords(num) {
   num = Math.floor(Math.abs(Number(num) || 0));
@@ -1091,8 +1092,8 @@ const Admin = {
   async renderOrders() {
     const m = $("#amain");
     m.innerHTML = `<div class="card"><div class="row">
-      <div style="flex:1;min-width:140px"><label>من تاريخ</label><input type="date" id="fFrom" value="${new Date().toISOString().slice(0, 10)}"></div>
-      <div style="flex:1;min-width:140px"><label>إلى تاريخ</label><input type="date" id="fTo" value="${new Date().toISOString().slice(0, 10)}"></div>
+      <div style="flex:1;min-width:140px"><label>من تاريخ</label><input type="date" id="fFrom" value="${bgDay()}"></div>
+      <div style="flex:1;min-width:140px"><label>إلى تاريخ</label><input type="date" id="fTo" value="${bgDay()}"></div>
       <div style="flex:1;min-width:140px"><label>الحالة</label><select id="fSt"><option value="">الكل</option>${Object.entries(STATUS).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select></div>
       <button class="btn dark" id="fGo" style="align-self:end">عرض</button></div></div>
       <div id="ordersOut" style="margin-top:12px"></div>`;
@@ -1126,7 +1127,7 @@ const Admin = {
   // ----- accounts -----
   async renderAccounts() {
     const m = $("#amain");
-    const month = S.accMonth || new Date().toISOString().slice(0, 7);
+    const month = S.accMonth || bgDay().slice(0, 7);
     S.accMonth = month;
     const [y, mo] = month.split("-").map(Number);
     const from = new Date(y, mo - 1, 1), to = new Date(y, mo, 1);
@@ -1151,7 +1152,7 @@ const Admin = {
     const byCat = {}; exps.forEach((e) => (byCat[e.category] = (byCat[e.category] || 0) + Number(e.amount)));
     const paid = {}; exps.filter((e) => e.employee_id).forEach((e) => (paid[e.employee_id] = (paid[e.employee_id] || 0) + Number(e.amount)));
     const CATS = ["إيجار", "وقود", "إعلانات", "اتصالات وإنترنت", "صيانة", "مكتب ولوازم", "أخرى"];
-    const today = new Date().toISOString().slice(0, 10);
+    const today = bgDay();
     const allNet = Number(T.commission || 0) + Number(T.other_income || 0) - Number(T.salaries || 0) - Number(T.expenses || 0);
     const cashIn = Number(T.received || 0) + Number(T.capital || 0) + Number(T.other_income || 0);
     const cashOut = Number(T.expenses || 0) + Number(T.salaries || 0) + Number(T.withdrawals || 0) + Number(T.other_payments || 0) + Number(T.driver_payouts || 0);
@@ -1325,7 +1326,7 @@ const Admin = {
   },
   async renderVouchers() {
     const m = $("#amain");
-    const iso = (d) => d.toISOString().slice(0, 10);
+    const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
     const now = new Date();
     S.vf ||= { type: "", from: iso(new Date(now.getFullYear(), now.getMonth(), 1)), to: iso(now) };
     m.innerHTML = `<div class="spinner" style="margin:40px auto"></div>`;
@@ -1368,7 +1369,7 @@ const Admin = {
     { const { data } = await sb.from("cash_boxes").select("*").eq("active", true).order("is_default", { ascending: false }).order("id"); S.boxes = data || []; }
     const defBox = pre.box_id || S.boxes.find((b) => b.is_default)?.id || S.boxes[0]?.id || "";
     const drivers = S.people.filter((p) => p.role === "driver");
-    const today = new Date().toISOString().slice(0, 10);
+    const today = bgDay();
     const parties = type === "receive" ? [["driver", "سائق (تسديد دين)"], ["partner", "شريك (رأس مال)"], ["other", "جهة أخرى (إيراد)"]]
       : type === "pay" ? [["partner", "شريك (سحب)"], ["driver", "سائق"], ["employee", "موظف (سلفة)"], ["other", "جهة أخرى"]]
       : pre.party_type === "employee" ? [["employee", "موظف"]] : [["other", "جهة"]];
@@ -1784,7 +1785,7 @@ const Admin = {
       }
       if (act === "toggleEmp") { const { data: e } = await sb.from("employees").select("active").eq("id", id).single(); await sb.from("employees").update({ active: !e.active }).eq("id", id); this.renderAccounts(); }
       if (act === "payAdvance") return this.voucherModal("pay", { party_type: "employee", party_id: id, note: "سلفة" });
-      if (act === "paySalary") return this.voucherModal("spend", { category: "رواتب", party_type: "employee", party_id: id, amount: b.dataset.left, salary_month: `${S.accMonth || new Date().toISOString().slice(0, 7)}-01` });
+      if (act === "paySalary") return this.voucherModal("spend", { category: "رواتب", party_type: "employee", party_id: id, amount: b.dataset.left, salary_month: `${S.accMonth || bgDay().slice(0, 7)}-01` });
       if (act === "unflag") { await sb.from("flagged_phones").delete().eq("phone", b.dataset.phone); this.renderFlagged(); }
     } catch (err) { toast(errMsg(err), true); }
   },
