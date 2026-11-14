@@ -69,6 +69,8 @@ Deno.serve(async (req) => {
         id: u.user!.id, role, name: body.name.trim(), phone,
         address: body.address || null, zone_id: body.zone_id || null,
         lat: body.lat ?? null, lng: body.lng ?? null, vehicle: body.vehicle || null, permissions,
+        vehicle_type: role === "driver" && ["motorcycle", "car"].includes(body.vehicle_type) ? body.vehicle_type : null,
+        vehicle_info: role === "driver" && body.vehicle_info && typeof body.vehicle_info === "object" ? body.vehicle_info : null,
         biz_type: role === "restaurant" ? (String(body.biz_type || "").trim().slice(0, 30) || "restaurant") : null,
       });
       if (e2) {

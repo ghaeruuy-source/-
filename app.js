@@ -244,6 +244,14 @@ function makeMap(el, zoom = 13) {
   return m;
 }
 const driverIcon = (d, busy) => L.divIcon({ className: "", html: `<div class="drv-pin ${!d.online ? "off" : busy ? "busy" : ""}">${esc((d.name || "س").trim()[0])}</div>`, iconSize: [30, 30], iconAnchor: [15, 15] });
+const VEH = { motorcycle: { label: "دراجة", icon: "🛵" }, car: { label: "سيارة", icon: "🚗" } };
+const VEH_FIELDS = [["make_model", "النوع والموديل", "مثلاً: كيا ريو / هوندا 150"], ["color", "اللون", "مثلاً: أبيض"], ["year", "سنة الصنع", "مثلاً: 2018"], ["plate", "رقم اللوحة", "مثلاً: 12345 أ"], ["plate_city", "محافظة اللوحة", "مثلاً: بابل"]];
+const DOC_TYPES = ["البطاقة الوطنية", "إجازة السوق", "سنوية المركبة", "بطاقة السكن", "صورة شخصية", "كفالة / تعهد", "أخرى"];
+const vehSummary = (t, v) => [VEH[t]?.icon + " " + VEH[t]?.label, v?.make_model, v?.color, v?.year, v?.plate && `لوحة ${v.plate}${v.plate_city ? " " + v.plate_city : ""}`].filter(Boolean).join(" · ");
+const vehFormHtml = (t, v = {}) => `<div class="field"><label>نوع المركبة</label><div class="seg seg-wide" id="vehSeg">${Object.entries(VEH).map(([k, x]) => `<button type="button" class="${k === (t || "motorcycle") ? "on" : ""}" data-veh="${k}">${x.icon} ${x.label}</button>`).join("")}</div><input type="hidden" name="vehicle_type" value="${t || "motorcycle"}"></div>
+  <div class="veh-grid">${VEH_FIELDS.map(([k, l, ph]) => `<div class="field"><label>${l}</label><input name="v_${k}" required value="${esc(v[k] || "")}" placeholder="${ph}" ${k === "year" ? 'inputmode="numeric" maxlength="4"' : ""}></div>`).join("")}</div>`;
+const bindVehSeg = (bg) => { const vs = $("#vehSeg", bg); if (vs) vs.onclick = (e) => { const t = e.target.closest("[data-veh]"); if (!t) return; vs.querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === t)); vs.parentElement.querySelector("[name=vehicle_type]").value = t.dataset.veh; }; };
+const readVeh = (f) => { const v = {}; VEH_FIELDS.forEach(([k]) => (v[k] = String(f["v_" + k] || "").trim())); return v; };
 const BIZ = { restaurant: { label: "المطعم", icon: "🍽" }, shop: { label: "المحل", icon: "🏪" }, page: { label: "البيج", icon: "📱" } };
 const bizInfo = (k) => BIZ[k] || (k ? { label: k, icon: "🏷" } : BIZ.restaurant);
 const bizLabel = (r) => { const b = bizInfo(r?.biz_type); return `${b.icon} ${b.label.replace(/^ال/, "")}`; };
@@ -1144,19 +1152,90 @@ const Admin = {
       <table><thead><tr><th>الاسم</th><th>الرقم</th><th>الحالة</th><th>الدين</th><th>توصيلات</th><th></th></tr></thead><tbody>
       ${ds.map((d) => { const b = S.balances?.[d.id] || {}; const debt = Number(b.debt || 0);
         return `<tr>
-        <td><i class="cdot" style="background:${driverColor(d.id)}"></i><b>${esc(d.name)}</b>${d.vehicle ? `<div class="small muted">${esc(d.vehicle)}</div>` : ""}</td>
+        <td><i class="cdot" style="background:${driverColor(d.id)}"></i><b>${esc(d.name)}</b>${d.vehicle_type ? `<div class="small muted">${esc(vehSummary(d.vehicle_type, d.vehicle_info))}</div>` : d.vehicle ? `<div class="small muted">${esc(d.vehicle)}</div>` : `<div class="small" style="color:var(--warn)">معلومات المركبة ناقصة</div>`}</td>
         <td>${tel(d.phone)}</td>
         <td>${!d.active ? `<span class="chip st-cancelled">موقوف</span>` : d.online ? `<span class="chip st-delivered">متصل</span>` : `<span class="chip">مطفي</span>`}<div class="small muted">${ago(d.location_at)}</div></td>
         <td><b class="${debt > 0 ? "pos" : ""}">${money(debt)}</b>${cap && debt >= cap ? `<div class="small" style="color:var(--bad)">واصل الحد</div>` : ""}</td>
         <td class="num">${b.delivered_count || 0}</td>
         <td><div class="row" style="flex-wrap:nowrap">
           <button class="btn sm ok" data-act="settle" data-id="${d.id}">تسديد</button>
+          <button class="btn sm" data-act="driverFile" data-id="${d.id}">📁 الملف <span class="doc-n" data-doccount="${d.id}"></span></button>
           <button class="btn sm" data-act="${canTab("statement") ? "stmt" : "ledger"}" data-type="driver" data-id="${d.id}">كشف حساب</button>
           <button class="btn sm ghost" data-act="toggleActive" data-id="${d.id}">${d.active ? "إيقاف" : "تفعيل"}</button>
           <button class="btn sm ghost" data-act="resetPw" data-id="${d.id}">رمز جديد</button>
           <button class="btn sm ghost danger" data-act="removeAcc" data-id="${d.id}">حذف</button>
         </div></td></tr>`; }).join("") || `<tr><td colspan="6" class="empty">ماكو سائقين. ضيف أول سائق.</td></tr>`}
       </tbody></table></div>${this.removedList("driver")}`;
+    sb.from("driver_documents").select("driver_id").then(({ data }) => {
+      const c = {}; (data || []).forEach((x) => (c[x.driver_id] = (c[x.driver_id] || 0) + 1));
+      document.querySelectorAll("[data-doccount]").forEach((el) => { const n = c[el.dataset.doccount] || 0; el.textContent = n ? `(${n})` : "⚠️"; el.title = n ? `${n} مستمسك` : "ماكو مستمسكات"; });
+    });
+  },
+  async driverFile(id) {
+    const d = S.people.find((x) => x.id === id) || S.drivers[id]; if (!d) return;
+    const bg = modal(`<div class="spread"><h3 style="margin:0">📁 ملف ${esc(d.name)}</h3><button class="btn sm ghost" data-close>سد</button></div>
+      <p class="small muted" style="margin:4px 0 12px">${tel(d.phone)}</p>
+      <details class="add-box" ${d.vehicle_type ? "" : "open"}><summary>${d.vehicle_type ? esc(vehSummary(d.vehicle_type, d.vehicle_info)) : "⚠️ معلومات المركبة ناقصة، كمّلها"}</summary>
+        <form id="vehForm" style="margin-top:10px">${vehFormHtml(d.vehicle_type, d.vehicle_info || (d.vehicle ? { make_model: d.vehicle } : {}))}<button class="btn primary block">حفظ معلومات المركبة</button></form></details>
+      <div class="section-title">المستمسكات</div>
+      <div class="doc-up card">
+        <div class="cat-chips" id="docType">${DOC_TYPES.map((t, i) => `<button type="button" class="chip-btn ${i === 0 ? "on" : ""}" data-dt="${esc(t)}">${esc(t)}</button>`).join("")}</div>
+        <label class="btn primary block" style="margin-top:10px">📷 ارفع صورة أو PDF<input type="file" id="docFile" accept="image/*,application/pdf" multiple hidden></label>
+        <div class="small muted" id="docMsg" style="margin-top:6px">تكدر تصور المستمسك بالكامرة مباشرة أو تختاره من الملفات. أقصى حجم 10MB.</div>
+      </div>
+      <div class="doc-grid" id="docGrid"><div class="muted small">جاري التحميل...</div></div>`, (bg) => {
+      bindVehSeg(bg);
+      $("#vehForm", bg).onsubmit = async (e) => {
+        e.preventDefault();
+        const f = Object.fromEntries(new FormData(e.target)); const v = readVeh(f);
+        const miss = VEH_FIELDS.find(([k]) => !v[k]); if (miss) return toast("اكمل: " + miss[1], true);
+        const upd = { vehicle_type: f.vehicle_type, vehicle_info: v, vehicle: vehSummary(f.vehicle_type, v) };
+        const { error } = await sb.from("profiles").update(upd).eq("id", id);
+        if (error) return toast(errMsg(error), true);
+        Object.assign(d, upd); toast("انحفظت معلومات المركبة");
+        bg.querySelector("details summary").textContent = upd.vehicle; bg.querySelector("details").open = false;
+        if (S.tab === "drivers") this.renderDrivers();
+      };
+      let dtype = DOC_TYPES[0];
+      $("#docType", bg).onclick = (e) => { const t = e.target.closest("[data-dt]"); if (!t) return; dtype = t.dataset.dt; $("#docType", bg).querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === t)); };
+      $("#docFile", bg).onchange = async (e) => {
+        const files = [...e.target.files]; e.target.value = ""; if (!files.length) return;
+        const msg = $("#docMsg", bg);
+        for (const [i, file] of files.entries()) {
+          if (file.size > 10485760) { toast(`${file.name} أكبر من 10MB`, true); continue; }
+          msg.textContent = `جاري رفع ${i + 1} من ${files.length}...`;
+          const ext = (file.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 5) || "jpg";
+          const path = `${id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+          const up = await sb.storage.from("driver-docs").upload(path, file, { contentType: file.type || undefined });
+          if (up.error) { toast(errMsg(up.error), true); continue; }
+          const { error } = await sb.from("driver_documents").insert({ driver_id: id, doc_type: dtype, file_path: path, file_name: file.name.slice(0, 120), mime: file.type || null });
+          if (error) { await sb.storage.from("driver-docs").remove([path]); toast(errMsg(error), true); }
+        }
+        msg.textContent = "✓ انرفع"; this.loadDocs(id, bg);
+      };
+      $("#docGrid", bg).onclick = async (e) => {
+        const b = e.target.closest("[data-deldoc]"); if (!b) return;
+        if (!confirm("تشيل هذا المستمسك؟")) return;
+        const { error } = await sb.from("driver_documents").delete().eq("id", Number(b.dataset.deldoc));
+        if (error) return toast(errMsg(error), true);
+        await sb.storage.from("driver-docs").remove([b.dataset.path]);
+        this.loadDocs(id, bg);
+      };
+      this.loadDocs(id, bg);
+    });
+    bg.querySelector(".modal").classList.add("wide");
+  },
+  async loadDocs(id, bg) {
+    const g = $("#docGrid", bg); if (!g) return;
+    const { data, error } = await sb.from("driver_documents").select("*").eq("driver_id", id).order("id", { ascending: false });
+    if (error) { g.innerHTML = `<div class="alert bad">${esc(errMsg(error))}</div>`; return; }
+    if (!data.length) { g.innerHTML = `<div class="card empty">ماكو مستمسكات بعد. اختار النوع وارفع.</div>`; return; }
+    const { data: urls } = await sb.storage.from("driver-docs").createSignedUrls(data.map((x) => x.file_path), 3600);
+    const u = {}; (urls || []).forEach((x) => (u[x.path] = x.signedUrl));
+    g.innerHTML = data.map((x) => { const url = u[x.file_path] || "#"; const pdf = (x.mime || "").includes("pdf");
+      return `<div class="doc-card"><a href="${url}" target="_blank" rel="noopener" class="doc-thumb">${pdf ? `<span>📄 PDF</span>` : `<img src="${url}" alt="" loading="lazy">`}</a>
+        <div class="doc-meta"><b>${esc(x.doc_type)}</b><span class="small muted">${dateTime(x.created_at)}</span></div>
+        <button class="btn sm ghost danger" data-deldoc="${x.id}" data-path="${esc(x.file_path)}">شيل</button></div>`; }).join("");
   },
   // ----- restaurants -----
   renderRestaurants() {
@@ -1868,6 +1947,7 @@ const Admin = {
       if (act === "restoreAcc") { if (!confirm(`إرجاع ${person?.name}؟ يرجع حسابه فعّال ويكدر يدخل.`)) return; await rpc("restore_account", { p_id: id }); toast("رجع الحساب"); await this.load(); return this.render(); }
       if (act === "permUser") return this.permModal(id || null);
       if (act === "stmClear") { S.stm.id = ""; return this.renderStatement(); }
+      if (act === "driverFile") return this.driverFile(id);
       if (act === "restLoc") {
         const r = S.restaurants[id] || S.people.find((x) => x.id === id); if (!r?.lat) return;
         const g = `https://www.google.com/maps?q=${r.lat},${r.lng}`;
@@ -1931,9 +2011,10 @@ const Admin = {
           <div class="field"><label>المنطقة</label><input name="zone_name" list="zoneDl" placeholder="اكتب اسم المنطقة..." autocomplete="off"><datalist id="zoneDl">${S.zones.map((z) => `<option value="${esc(z.name)}">`).join("")}</datalist>
             <div class="small muted" id="zoneHint" style="margin-top:4px"></div></div>
           <div class="field" id="zoneFeeF" hidden><label>أجرة التوصيل للمنطقة الجديدة (د.ع)</label><input name="zone_fee" inputmode="numeric" class="ltr" placeholder="مثلاً 3000"></div>`
-        : `<div class="field"><label>نوع المركبة / رقمها (اختياري)</label><input name="vehicle"></div>`}
+        : vehFormHtml("motorcycle")}
         <div class="row" style="flex-wrap:nowrap"><button class="btn primary" style="flex:1">إنشاء الحساب</button><button type="button" class="btn ghost" data-close>إلغاء</button></div>
       </form>`, (bg, close) => {
+      bindVehSeg(bg);
       const bs = $("#bizSeg", bg);
       const bn = $("#bizNew", bg);
       if (bs) bs.onclick = (e) => {
@@ -1972,13 +2053,19 @@ const Admin = {
             }
           }
           delete f.zone_name; delete f.zone_fee; delete f.biz_new;
+          if (!isR) {
+            const v = readVeh(f);
+            const miss = VEH_FIELDS.find(([k]) => !v[k]); if (miss) throw new Error("اكمل معلومات المركبة: " + miss[1]);
+            Object.keys(f).filter((k) => k.startsWith("v_")).forEach((k) => delete f[k]);
+            f.vehicle_info = v; f.vehicle = vehSummary(f.vehicle_type, v);
+          }
           if (isR && !String(f.biz_type || "").trim()) throw new Error("اكتب النوع الجديد");
-          await adminUsers({ action: "create", role, ...f, zone_id });
+          const res = await adminUsers({ action: "create", role, ...f, zone_id });
           close();
           const link = location.origin + location.pathname;
           modal(`<h3>تم ✓</h3><p>دز هذي المعلومات لـ ${esc(f.name)}:</p>
             <div class="card" style="user-select:all;white-space:pre-line">الرابط: ${esc(link)}\nالرقم: ${esc(normPhone(f.phone))}\nالرمز: ${esc(f.password)}</div>
-            <div class="row" style="margin-top:12px"><a class="btn ok" target="_blank" rel="noopener" href="https://wa.me/964${normPhone(f.phone).slice(1)}?text=${encodeURIComponent(`هلا ${f.name}، حسابك على ${S.settings.app_name} جاهز.\nالرابط: ${link}\nالرقم: ${normPhone(f.phone)}\nالرمز: ${f.password}`)}">إرسال واتساب</a><button class="btn" data-close>سد</button></div>`);
+            <div class="row" style="margin-top:12px"><a class="btn ok" target="_blank" rel="noopener" href="https://wa.me/964${normPhone(f.phone).slice(1)}?text=${encodeURIComponent(`هلا ${f.name}، حسابك على ${S.settings.app_name} جاهز.\nالرابط: ${link}\nالرقم: ${normPhone(f.phone)}\nالرمز: ${f.password}`)}">إرسال واتساب</a>${!isR && res?.id ? `<button class="btn primary" data-close data-act="driverFile" data-id="${res.id}">📁 ارفع مستمسكاته</button>` : ""}<button class="btn" data-close>سد</button></div>`, (b2) => { const fb = b2.querySelector("[data-act=driverFile]"); if (fb) fb.onclick = () => setTimeout(() => this.driverFile(res.id), 50); });
           this.load();
         } catch (err) { toast(errMsg(err), true); btn.disabled = false; }
       };
