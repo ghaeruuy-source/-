@@ -235,3 +235,15 @@ button, input, select, textarea { font-family: inherit; }
   .card, .stat { box-shadow: none; break-inside: avoid; }
   .wrap { max-width: none; padding: 0; }
 }
+.chip.vt-receive { color: var(--ok); background: #E3F4EA; }
+.chip.vt-spend { color: var(--bad); background: #FBE7E7; }
+.chip.vt-pay { color: var(--info); background: #E6F0FA; }
+tr.voided td { opacity: .6; text-decoration: line-through; }
+tr.voided td:last-child, tr.voided td:nth-last-child(2) { text-decoration: none; }
+tr.tot td { border-top: 2px solid var(--ink); background: var(--surface-2); }
+.print-only { display: none; }
+@media print { .print-only { display: block; } }
+.stat .v.neg { color: var(--ok); } .stat .v.pos { color: var(--bad); }
+.date-range { margin-inline-start: auto; }
+.date-range input { width: auto; min-width: 0; max-width: 150px; }
+@media (max-width: 600px) { .date-range { margin-inline-start: 0; width: 100%; flex-wrap: nowrap; } .date-range input { flex: 1; max-width: none; } }

@@ -49,6 +49,31 @@ const STATUS = {
   refused: "مرفوض / ما رد",
   cancelled: "ملغي",
 };
+const VT = { receive: "سند قبض", spend: "سند صرف", pay: "سند دفع" };
+function numToWords(num) {
+  num = Math.floor(Math.abs(Number(num) || 0));
+  if (!num) return "صفر دينار";
+  const ones = ["", "واحد", "اثنان", "ثلاثة", "أربعة", "خمسة", "ستة", "سبعة", "ثمانية", "تسعة", "عشرة", "أحد عشر", "اثنا عشر", "ثلاثة عشر", "أربعة عشر", "خمسة عشر", "ستة عشر", "سبعة عشر", "ثمانية عشر", "تسعة عشر"];
+  const tens = ["", "", "عشرون", "ثلاثون", "أربعون", "خمسون", "ستون", "سبعون", "ثمانون", "تسعون"];
+  const hund = ["", "مائة", "مائتان", "ثلاثمائة", "أربعمائة", "خمسمائة", "ستمائة", "سبعمائة", "ثمانمائة", "تسعمائة"];
+  const u1000 = (n) => {
+    const p = []; const h = Math.floor(n / 100), r = n % 100;
+    if (h) p.push(hund[h]);
+    if (r) p.push(r < 20 ? ones[r] : (r % 10 ? ones[r % 10] + " و" : "") + tens[Math.floor(r / 10)]);
+    return p.join(" و");
+  };
+  const scales = [["", "", ""], ["ألف", "ألفان", "آلاف"], ["مليون", "مليونان", "ملايين"], ["مليار", "ملياران", "مليارات"]];
+  const parts = []; let i = 0;
+  while (num > 0 && i < scales.length) {
+    const n = num % 1000;
+    if (n) {
+      const [one, two, few] = scales[i];
+      parts.unshift(!i ? u1000(n) : n === 1 ? one : n === 2 ? two : n <= 10 ? `${u1000(n)} ${few}` : `${u1000(n)} ${one}`);
+    }
+    num = Math.floor(num / 1000); i++;
+  }
+  return parts.join(" و") + " دينار عراقي لا غير";
+}
 const ACTIVE = ["searching", "offered", "accepted", "picked_up", "on_the_way"];
 const chip = (s) => `<span class="chip st-${s}">${STATUS[s] || s}</span>`;
 const zoneName = (id) => S.zones.find((z) => z.id === id)?.name || "—";
@@ -788,11 +813,11 @@ const Admin = {
   },
   render(soft = false) {
     const active = S.orders.filter((o) => ACTIVE.includes(o.status));
-    const tabs = [["live", `الرئيسية${active.length ? `<span class="pill-count">${active.length}</span>` : ""}`], ["map", "🗺 الخريطة"], ["drivers", "السائقين"], ["restaurants", "المطاعم"], ["orders", "كل الطلبات"], ["accounts", "الحسابات"], ["reports", "التقارير"], ["zones", "المناطق والأجور"], ["flagged", "أرقام مرفوضة"], ["settings", "الإعدادات"]];
+    const tabs = [["live", `الرئيسية${active.length ? `<span class="pill-count">${active.length}</span>` : ""}`], ["map", "🗺 الخريطة"], ["drivers", "السائقين"], ["restaurants", "المطاعم"], ["orders", "كل الطلبات"], ["vouchers", "السندات"], ["daily", "الحركة اليومية"], ["accounts", "الحسابات"], ["reports", "التقارير"], ["zones", "المناطق والأجور"], ["flagged", "أرقام مرفوضة"], ["settings", "الإعدادات"]];
     $("#atabs").innerHTML = tabs.map(([k, l]) => `<button class="tab ${S.tab === k ? "on" : ""}" data-tab="${k}">${l}</button>`).join("");
     const m = $("#amain");
     // forms shouldn't be wiped by realtime updates
-    if (soft && ["settings", "zones", "flagged", "accounts", "orders", "reports"].includes(S.tab) && m.dataset.view === S.tab) return;
+    if (soft && ["settings", "zones", "flagged", "accounts", "orders", "reports", "vouchers", "daily"].includes(S.tab) && m.dataset.view === S.tab) return;
     document.body.classList.toggle("live-mode", S.tab === "map");
     if (S.tab !== "map" && S.maps.admin) { S.maps.admin.remove(); S.maps.admin = null; S.markers = {}; S.fitted = false; }
     m.dataset.view = S.tab;
@@ -800,6 +825,8 @@ const Admin = {
     if (S.tab === "map") return this.renderMap();
     if (S.tab === "accounts") return this.renderAccounts();
     if (S.tab === "reports") return this.renderReports();
+    if (S.tab === "vouchers") return this.renderVouchers();
+    if (S.tab === "daily") return this.renderDaily();
     if (S.tab === "drivers") return this.renderDrivers();
     if (S.tab === "restaurants") return this.renderRestaurants();
     if (S.tab === "zones") return this.renderZones();
@@ -1073,7 +1100,7 @@ const Admin = {
     const [od, lg, ex, em, ft] = await Promise.all([
       sb.from("orders").select("id,commission,delivery_fee,driver_id").eq("status", "delivered").gte("delivered_at", from.toISOString()).lt("delivered_at", to.toISOString()).limit(10000),
       sb.from("ledger").select("amount,kind,driver_id").gte("created_at", from.toISOString()).lt("created_at", to.toISOString()).limit(10000),
-      sb.from("expenses").select("*").gte("spent_on", fromD).lt("spent_on", toD).order("spent_on", { ascending: false }),
+      sb.from("expenses").select("*").eq("void", false).gte("spent_on", fromD).lt("spent_on", toD).order("spent_on", { ascending: false }),
       sb.from("employees").select("*").order("active", { ascending: false }).order("name"),
       sb.rpc("finance_totals"),
     ]);
@@ -1090,9 +1117,9 @@ const Admin = {
     const paid = {}; exps.filter((e) => e.employee_id).forEach((e) => (paid[e.employee_id] = (paid[e.employee_id] || 0) + Number(e.amount)));
     const CATS = ["إيجار", "وقود", "إعلانات", "اتصالات وإنترنت", "صيانة", "مكتب ولوازم", "أخرى"];
     const today = new Date().toISOString().slice(0, 10);
-    const allNet = Number(T.commission || 0) + Number(T.adjustments || 0) - Number(T.salaries || 0) - Number(T.expenses || 0);
-    const cashIn = Number(T.received || 0) + Number(T.capital || 0);
-    const cashOut = Number(T.expenses || 0) + Number(T.salaries || 0) + Number(T.withdrawals || 0);
+    const allNet = Number(T.commission || 0) + Number(T.other_income || 0) - Number(T.salaries || 0) - Number(T.expenses || 0);
+    const cashIn = Number(T.received || 0) + Number(T.capital || 0) + Number(T.other_income || 0);
+    const cashOut = Number(T.expenses || 0) + Number(T.salaries || 0) + Number(T.withdrawals || 0) + Number(T.other_payments || 0) + Number(T.driver_payouts || 0);
     const partners = T.partners || [];
     const shareSum = partners.filter((p) => p.active).reduce((a, p) => a + Number(p.share), 0);
     m.innerHTML = `
@@ -1102,16 +1129,18 @@ const Admin = {
           <h3>💰 القاصة (النقد اللي عندكم هسه)</h3>
           <div class="acc-line"><span>استلمتوا من السائقين (عمولات)</span><b class="neg">+${money(T.received)}</b></div>
           <div class="acc-line"><span>رأس مال دخّله الشركاء</span><b class="neg">+${money(T.capital)}</b></div>
+          <div class="acc-line"><span>إيرادات أخرى (سندات قبض)</span><b class="neg">+${money(T.other_income)}</b></div>
           <div class="acc-line"><span>مصاريف</span><b class="pos">−${money(T.expenses)}</b></div>
           <div class="acc-line"><span>رواتب</span><b class="pos">−${money(T.salaries)}</b></div>
           <div class="acc-line"><span>سحوبات الشركاء</span><b class="pos">−${money(T.withdrawals)}</b></div>
+          <div class="acc-line"><span>دفعات أخرى (سندات دفع)</span><b class="pos">−${money(Number(T.other_payments || 0) + Number(T.driver_payouts || 0))}</b></div>
           <div class="acc-line total"><span>الرصيد بالقاصة</span><b>${money(cashIn - cashOut)}</b></div>
           <p class="small muted" style="margin:8px 0 0">وبرّه القاصة: ديون على السائقين ما استلمتوها بعد <b>${money(T.debt)}</b></p>
         </section>
         <section class="card">
           <h3>🤝 الشركاء</h3>
           ${partners.length && Math.abs(shareSum - 100) > 0.01 ? `<div class="alert warn small" style="margin-bottom:8px">مجموع النسب ${shareSum}% لازم يكون 100%</div>` : ""}
-          <p class="small muted" style="margin:-6px 0 8px">صافي ربح الشركة من البداية: <b>${money(allNet)}</b> (العمولات − الرواتب − المصاريف)</p>
+          <p class="small muted" style="margin:-6px 0 8px">صافي ربح الشركة من البداية: <b>${money(allNet)}</b> (العمولات + الإيرادات الأخرى − الرواتب − المصاريف)</p>
           ${partners.map((p) => { const due = allNet * Number(p.share) / 100 - Number(p.withdrawals);
             return `<div class="partner"><div class="spread"><b>${esc(p.name)} · ${Number(p.share)}%</b>
               <div class="row" style="flex-wrap:nowrap"><button class="btn sm ok" data-act="pWithdraw" data-id="${p.id}">سحب</button><button class="btn sm" data-act="pCapital" data-id="${p.id}">رأس مال</button><button class="btn sm ghost" data-act="pShare" data-id="${p.id}" data-share="${p.share}">النسبة</button></div></div>
@@ -1136,16 +1165,10 @@ const Admin = {
       <div class="dash">
         <section class="card">
           <h3>المصاريف</h3>
-          <form id="expForm" class="exp-form">
-            <input type="date" name="spent_on" value="${today.startsWith(month) ? today : fromD}" required>
-            <select name="category">${CATS.map((c) => `<option>${c}</option>`).join("")}</select>
-            <input name="amount" inputmode="numeric" class="ltr" placeholder="المبلغ" required>
-            <input name="note" placeholder="ملاحظة (اختياري)">
-            <button class="btn primary">إضافة</button>
-          </form>
+          <div class="row"><button class="btn primary" data-act="newVoucher" data-type="spend">+ سند صرف (مصروف)</button><button class="btn ghost" data-tab-go="vouchers">كل السندات</button></div>
           ${Object.keys(byCat).length ? `<div class="row" style="margin:10px 0">${Object.entries(byCat).sort((a, b) => b[1] - a[1]).map(([c, v]) => `<span class="chip">${esc(c)}: ${Number(v).toLocaleString("en-US")}</span>`).join("")}</div>` : ""}
           ${exps.map((e) => `<div class="ledger-item"><div><b>${esc(e.category)}</b>${e.employee_id ? ` · ${esc(emps.find((x) => x.id === e.employee_id)?.name || "")}` : ""}${e.note ? ` · ${esc(e.note)}` : ""}<div class="small muted">${esc(e.spent_on)}</div></div>
-            <div class="row" style="flex-wrap:nowrap"><b>${money(e.amount)}</b><button class="btn sm ghost" data-act="delExp" data-id="${e.id}" title="حذف">✕</button></div></div>`).join("") || `<div class="empty">ماكو مصاريف بهذا الشهر</div>`}
+            <div class="row" style="flex-wrap:nowrap"><b>${money(e.amount)}</b><button class="btn sm ghost" data-act="delExp" data-id="${e.id}" data-voucher="${e.voucher_id || ""}" title="حذف">✕</button></div></div>`).join("") || `<div class="empty">ماكو مصاريف بهذا الشهر</div>`}
         </section>
         <section class="card">
           <h3>الموظفين والرواتب</h3>
@@ -1170,12 +1193,6 @@ const Admin = {
       toast("انضاف الشريك"); this.renderAccounts();
     };
     $("#accMonth").onchange = (e) => { S.accMonth = e.target.value || month; this.renderAccounts(); };
-    $("#expForm").onsubmit = async (e) => {
-      e.preventDefault(); const f = e.target;
-      const { error } = await sb.from("expenses").insert({ spent_on: f.spent_on.value, category: f.category.value, amount: toNum(f.amount.value), note: f.note.value || null });
-      if (error) return toast(errMsg(error), true);
-      toast("انضاف المصروف"); this.renderAccounts();
-    };
     $("#empForm").onsubmit = async (e) => {
       e.preventDefault(); const f = e.target;
       const { error } = await sb.from("employees").insert({ name: f.name.value.trim(), job: f.job.value || null, monthly_salary: toNum(f.monthly_salary.value) });
@@ -1198,13 +1215,13 @@ const Admin = {
     S.rep ||= { key: "month", from: presets.month[1], to: presets.month[2] };
     m.innerHTML = `<div class="card no-print"><div class="row">
         ${Object.entries(presets).map(([k, [l]]) => `<button class="btn sm ${S.rep.key === k ? "dark" : "ghost"}" data-preset="${k}">${l}</button>`).join("")}
-        <span class="row" style="flex-wrap:nowrap;margin-inline-start:auto"><input type="date" id="rFrom" value="${S.rep.from}" style="width:auto"> إلى <input type="date" id="rTo" value="${S.rep.to}" style="width:auto"><button class="btn sm dark" id="rGo">عرض</button></span>
+        <span class="row date-range"><input type="date" id="rFrom" value="${S.rep.from}" style="width:auto"> إلى <input type="date" id="rTo" value="${S.rep.to}" style="width:auto"><button class="btn sm dark" id="rGo">عرض</button></span>
       </div></div><div id="repOut"><div class="spinner" style="margin:40px auto"></div></div>`;
     m.querySelectorAll("[data-preset]").forEach((b) => (b.onclick = () => { const [, f, t] = presets[b.dataset.preset]; S.rep = { key: b.dataset.preset, from: f, to: t }; this.renderReports(); }));
     $("#rGo").onclick = () => { S.rep = { key: "custom", from: $("#rFrom").value, to: $("#rTo").value }; this.renderReports(); };
     const [{ data: R, error }, { data: T }] = await Promise.all([rpc0("profit_report", { p_from: S.rep.from, p_to: S.rep.to }), rpc0("finance_totals")]);
     if (error) { $("#repOut").innerHTML = `<div class="alert bad">${esc(error.message)}</div>`; return; }
-    const net = Number(R.commission) - Number(R.salaries) - Number(R.expenses);
+    const net = Number(R.commission) + Number(R.other_income || 0) - Number(R.salaries) - Number(R.expenses);
     const partners = (T?.partners || []).filter((p) => p.active);
     const n = (v) => Number(v || 0).toLocaleString("en-US");
     const tbl = (head, rows) => `<div class="table-wrap"><table><thead><tr>${head.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.join("") || `<tr><td colspan="${head.length}" class="empty">ماكو بيانات</td></tr>`}</tbody></table></div>`;
@@ -1214,7 +1231,7 @@ const Admin = {
       <div class="spread" style="margin:16px 0 8px"><h2 style="margin:0">تقرير الأرباح · من <span class="num">${S.rep.from}</span> إلى <span class="num">${S.rep.to}</span></h2>
         <div class="row no-print"><button class="btn sm" id="rCsv">⬇ تنزيل Excel</button><button class="btn sm" onclick="window.print()">🖨 طباعة</button></div></div>
       <div class="stats five">
-        <div class="stat"><div class="v">${money(R.commission)}</div><div class="l">العمولات (الإيراد)</div></div>
+        <div class="stat"><div class="v">${money(Number(R.commission) + Number(R.other_income || 0))}</div><div class="l">الإيرادات (عمولات ${n(R.commission)}${R.other_income ? ` + أخرى ${n(R.other_income)}` : ""})</div></div>
         <div class="stat"><div class="v">${money(R.salaries)}</div><div class="l">الرواتب</div></div>
         <div class="stat"><div class="v">${money(R.expenses)}</div><div class="l">المصاريف</div></div>
         <div class="stat ${net >= 0 ? "good" : "badv"}"><div class="v">${money(net)}</div><div class="l">صافي الربح</div></div>
@@ -1257,6 +1274,163 @@ const Admin = {
       const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
       a.download = `تقرير-${S.rep.from}-${S.rep.to}.csv`; a.click();
     };
+  },
+  // ----- vouchers (سندات) -----
+  async loadVoucherRefs() {
+    const [c, p, e] = await Promise.all([
+      sb.from("expense_categories").select("*").order("id"),
+      sb.from("partners").select("*").order("id"),
+      sb.from("employees").select("*").order("name"),
+    ]);
+    S.cats = c.data || []; S.partners = p.data || []; S.employees = e.data || [];
+  },
+  async renderVouchers() {
+    const m = $("#amain");
+    const iso = (d) => d.toISOString().slice(0, 10);
+    const now = new Date();
+    S.vf ||= { type: "", from: iso(new Date(now.getFullYear(), now.getMonth(), 1)), to: iso(now) };
+    m.innerHTML = `<div class="spinner" style="margin:40px auto"></div>`;
+    await this.loadVoucherRefs();
+    let q = sb.from("vouchers").select("*").gte("voucher_date", S.vf.from).lte("voucher_date", S.vf.to).order("voucher_date", { ascending: false }).order("id", { ascending: false }).limit(1000);
+    q = S.vf.type === "deleted" ? q.eq("cancelled", true) : q.eq("cancelled", false);
+    if (S.vf.type && S.vf.type !== "deleted") q = q.eq("vtype", S.vf.type);
+    const { data, error } = await q;
+    if (error) { m.innerHTML = `<div class="alert bad">${esc(error.message)}</div>`; return; }
+    const sum = (t) => data.filter((v) => v.vtype === t).reduce((a, v) => a + Number(v.amount), 0);
+    const del = S.vf.type === "deleted";
+    m.innerHTML = `
+      <div class="spread"><h2 style="margin:0">السندات</h2>
+        <div class="row"><button class="btn ok" data-act="newVoucher" data-type="receive">+ سند قبض</button><button class="btn bad" data-act="newVoucher" data-type="spend">+ سند صرف</button><button class="btn dark" data-act="newVoucher" data-type="pay">+ سند دفع</button></div></div>
+      <div class="card" style="margin-top:12px"><div class="row">
+        ${[["", "الكل"], ["receive", "قبض"], ["spend", "صرف"], ["pay", "دفع"], ["deleted", "🗑 المحذوفات"]].map(([k, l]) => `<button class="btn sm ${S.vf.type === k ? "dark" : "ghost"}" data-vf="${k}">${l}</button>`).join("")}
+        <span class="row date-range"><input type="date" id="vFrom" value="${S.vf.from}" style="width:auto"> إلى <input type="date" id="vTo" value="${S.vf.to}" style="width:auto"></span></div></div>
+      ${!del ? `<div class="stats" style="margin-top:12px">
+        <div class="stat"><div class="v neg">${money(sum("receive"))}</div><div class="l">مقبوضات</div></div>
+        <div class="stat"><div class="v pos">${money(sum("spend"))}</div><div class="l">مصروفات</div></div>
+        <div class="stat"><div class="v pos">${money(sum("pay"))}</div><div class="l">مدفوعات</div></div>
+        <div class="stat"><div class="v">${money(sum("receive") - sum("spend") - sum("pay"))}</div><div class="l">الفرق</div></div></div>` : `<div class="alert warn" style="margin-top:12px">السندات المحذوفة ما تدخل بالحسابات. تبقى هنا للمراجعة مع سبب الحذف.</div>`}
+      <div class="card table-wrap" style="margin-top:12px;padding:0"><table><thead><tr><th>السند</th><th>التاريخ</th><th>الجهة</th><th>التبويب</th><th>المبلغ</th><th>${del ? "سبب الحذف" : "ملاحظة"}</th><th></th></tr></thead><tbody>
+        ${data.map((v) => `<tr class="${v.cancelled ? "voided" : ""}"><td><span class="chip vt-${v.vtype}">${VT[v.vtype]} #${v.number}</span></td><td class="num">${v.voucher_date}</td><td>${esc(v.party_name || "—")}</td><td>${esc(v.category || "—")}</td><td><b>${money(v.amount)}</b></td>
+          <td class="small">${del ? `${esc(v.cancel_reason || "")}<div class="muted">${dateTime(v.cancelled_at)}</div>` : esc(v.note || "")}</td>
+          <td><div class="row" style="flex-wrap:nowrap"><button class="btn sm ghost" data-act="printV" data-id="${v.id}">🖨</button>${!del ? `<button class="btn sm ghost" data-act="cancelV" data-id="${v.id}">حذف</button>` : ""}</div></td></tr>`).join("") || `<tr><td colspan="7" class="empty">ماكو سندات</td></tr>`}
+      </tbody></table></div>
+      <section class="card" style="margin-top:16px"><h3>تبويبات المصاريف</h3>
+        <div class="row">${S.cats.map((c) => `<button class="btn sm ${c.active ? "" : "ghost"}" data-cat="${c.id}" title="تفعيل/إيقاف">${esc(c.name)}${c.active ? "" : " (موقوف)"}</button>`).join("")}</div>
+        <form id="catForm" class="row" style="margin-top:10px;flex-wrap:nowrap"><input name="name" placeholder="تبويب جديد (مثلاً: غرامات)" required><button class="btn dark">إضافة</button></form></section>`;
+    S.vRows = data;
+    m.querySelectorAll("[data-vf]").forEach((b) => (b.onclick = () => { S.vf.type = b.dataset.vf; this.renderVouchers(); }));
+    $("#vFrom").onchange = (e) => { S.vf.from = e.target.value; this.renderVouchers(); };
+    $("#vTo").onchange = (e) => { S.vf.to = e.target.value; this.renderVouchers(); };
+    m.querySelectorAll("[data-cat]").forEach((b) => (b.onclick = async () => { const c = S.cats.find((x) => String(x.id) === b.dataset.cat); await sb.from("expense_categories").update({ active: !c.active }).eq("id", c.id); this.renderVouchers(); }));
+    $("#catForm").onsubmit = async (e) => { e.preventDefault(); const { error } = await sb.from("expense_categories").insert({ name: e.target.name.value.trim() }); if (error) return toast(error.message.includes("duplicate") ? "التبويب موجود" : errMsg(error), true); this.renderVouchers(); };
+  },
+  async voucherModal(type, pre = {}) {
+    if (!S.cats) await this.loadVoucherRefs();
+    const drivers = S.people.filter((p) => p.role === "driver");
+    const today = new Date().toISOString().slice(0, 10);
+    const parties = type === "receive" ? [["driver", "سائق (تسديد دين)"], ["partner", "شريك (رأس مال)"], ["other", "جهة أخرى (إيراد)"]]
+      : type === "pay" ? [["partner", "شريك (سحب)"], ["driver", "سائق"], ["employee", "موظف (سلفة)"], ["other", "جهة أخرى"]]
+      : [["other", "جهة"], ["employee", "موظف (راتب)"]];
+    const pt = pre.party_type || parties[0][0];
+    modal(`<h3>${VT[type]} جديد</h3>
+      <form id="vForm">
+        ${type === "spend" ? `<div class="field"><label>التبويب</label><select name="category" required>${S.cats.filter((c) => c.active || c.name === pre.category).map((c) => `<option ${c.name === (pre.category || "مصاريف عامة") ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select></div>` : ""}
+        <div class="field"><label>${type === "receive" ? "استلمنا من" : type === "spend" ? "صرفنا إلى" : "دفعنا إلى"}</label>
+          <select name="party_type">${parties.map(([k, l]) => `<option value="${k}" ${k === pt ? "selected" : ""}>${l}</option>`).join("")}</select></div>
+        <div class="field" id="pSel"></div>
+        <div class="row" style="flex-wrap:nowrap"><div class="field" style="flex:1"><label>المبلغ (د.ع)</label><input name="amount" inputmode="numeric" class="ltr" required value="${esc(pre.amount ?? "")}"></div>
+          <div class="field" style="flex:1"><label>التاريخ</label><input type="date" name="date" value="${today}" required></div></div>
+        <div id="amtWords" class="small muted" style="margin:-6px 0 10px"></div>
+        <div class="field"><label>البيان / ملاحظة</label><input name="note" placeholder="${type === "spend" ? "مثلاً: بانزين للسيارة" : ""}"></div>
+        <div class="row" style="flex-wrap:nowrap"><button class="btn ${type === "receive" ? "ok" : type === "spend" ? "bad" : "dark"}" style="flex:1">حفظ السند</button><button type="button" class="btn ghost" data-close>إلغاء</button></div>
+      </form>`, (bg, close) => {
+      const f = $("#vForm", bg);
+      const opts = (list, val) => list.map((x) => `<option value="${x.id}" ${String(x.id) === String(val) ? "selected" : ""}>${esc(x.name)}${x.extra || ""}</option>`).join("");
+      const drawParty = () => {
+        const t = f.party_type.value, box = $("#pSel", bg);
+        if (t === "driver") box.innerHTML = `<label>السائق</label><select name="party_id">${opts(drivers.map((d) => ({ id: d.id, name: d.name, extra: ` — دينه ${Number(S.balances?.[d.id]?.debt || 0).toLocaleString("en-US")}` })), pre.party_id)}</select>`;
+        else if (t === "partner") box.innerHTML = S.partners.length ? `<label>الشريك</label><select name="party_id">${opts(S.partners, pre.party_id)}</select>` : `<div class="alert warn small">ضيف الشركاء أول من تبويب الحسابات</div>`;
+        else if (t === "employee") box.innerHTML = S.employees.length ? `<label>الموظف</label><select name="party_id">${opts(S.employees.filter((e) => e.active), pre.party_id)}</select>` : `<div class="alert warn small">ضيف الموظفين أول من تبويب الحسابات</div>`;
+        else box.innerHTML = `<label>الاسم</label><input name="party_name" placeholder="${type === "receive" ? "من منو؟" : "لمنو؟"}" ${type === "spend" ? "" : "required"}>`;
+        if (t === "driver" && !f.amount.value) { const d = S.balances?.[f.party_id?.value]; if (d?.debt > 0 && type === "receive") f.amount.value = d.debt; }
+      };
+      f.party_type.onchange = drawParty; drawParty();
+      const words = () => ($("#amtWords", bg).textContent = toNum(f.amount.value) ? `كتابةً: ${numToWords(toNum(f.amount.value))}` : "");
+      f.amount.oninput = words; words();
+      f.onsubmit = async (e) => {
+        e.preventDefault(); const btn = f.querySelector("button"); btn.disabled = true;
+        try {
+          const v = await rpc("create_voucher", {
+            p_type: type, p_amount: toNum(f.amount.value), p_date: f.date.value, p_category: f.category?.value || null,
+            p_party_type: f.party_type.value, p_party_id: f.party_id?.value || null, p_party_name: f.party_name?.value || null,
+            p_note: f.note.value || null, p_salary_month: pre.salary_month || null,
+          });
+          close(); toast(`انحفظ ${VT[type]} رقم ${v.number}`);
+          modal(`<h3>✓ ${VT[type]} رقم ${v.number}</h3><p>${money(v.amount)} · ${esc(v.party_name || "")}</p>
+            <div class="row"><button class="btn dark" id="pv">🖨 طباعة السند</button><button class="btn" data-close>تمام</button></div>`, (bg2, close2) => { $("#pv", bg2).onclick = () => { this.printVoucher(v.id, v); close2(); }; });
+          await this.load();
+          if (S.tab === "vouchers") this.renderVouchers(); else if (S.tab === "accounts") this.renderAccounts(); else if (S.tab === "daily") this.renderDaily();
+        } catch (err) { toast(errMsg(err), true); btn.disabled = false; }
+      };
+    });
+  },
+  async printVoucher(id, v) {
+    if (!v) { const r = await sb.from("vouchers").select("*").eq("id", id).single(); v = r.data; }
+    if (!v) return;
+    const st = S.settings || {};
+    const who = { receive: "استلمنا من السيد/ة", spend: "صرفنا إلى", pay: "دفعنا إلى" }[v.vtype];
+    const w = window.open("", "_blank");
+    w.document.write(`<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>${VT[v.vtype]} ${v.number}</title>
+      <link href="https://fonts.googleapis.com/css2?family=${(st.font_family || "IBM Plex Sans Arabic").replace(/ /g, "+")}:wght@400;700&display=swap" rel="stylesheet">
+      <style>body{font-family:"${st.font_family || "IBM Plex Sans Arabic"}",sans-serif;margin:0;padding:24px;color:#111}.v{max-width:720px;margin:auto;border:2px solid #111;border-radius:12px;padding:24px}
+      .h{display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid ${st.primary_color || "#E8590C"};padding-bottom:12px;margin-bottom:16px}
+      .t{font-size:26px;font-weight:700;color:${st.primary_color || "#E8590C"}}.r{display:flex;gap:8px;margin:12px 0;font-size:17px}.r b{min-width:140px}
+      .amt{border:2px dashed #999;border-radius:8px;padding:10px 14px;font-size:22px;font-weight:700;display:inline-block;direction:ltr}
+      .sig{display:flex;justify-content:space-between;margin-top:48px;font-size:15px}.sig div{border-top:1px solid #111;padding-top:6px;width:30%;text-align:center}
+      .void{color:#c00;font-size:28px;font-weight:700;text-align:center;border:3px solid #c00;padding:6px;margin-bottom:12px}@media print{body{padding:0}}</style></head><body><div class="v">
+      ${v.cancelled ? `<div class="void">محذوف — ${esc(v.cancel_reason || "")}</div>` : ""}
+      <div class="h"><div><div style="font-size:20px;font-weight:700">${esc(st.app_name || "")}</div><div style="font-size:13px">الحلة${st.support_phone ? " · " + esc(st.support_phone) : ""}</div></div>
+        <div style="text-align:left"><div class="t">${VT[v.vtype]}</div><div>رقم: <b>${v.number}</b></div><div>التاريخ: <b>${v.voucher_date}</b></div></div></div>
+      <div class="r"><b>المبلغ:</b><span class="amt">${Number(v.amount).toLocaleString("en-US")} IQD</span></div>
+      <div class="r"><b>مبلغ قدره:</b><span>${numToWords(Number(v.amount))}</span></div>
+      <div class="r"><b>${who}:</b><span>${esc(v.party_name || "—")}</span></div>
+      ${v.category ? `<div class="r"><b>التبويب:</b><span>${esc(v.category)}</span></div>` : ""}
+      <div class="r"><b>وذلك عن:</b><span>${esc(v.note || "—")}</span></div>
+      <div class="sig"><div>المستلم</div><div>المحاسب</div><div>المدير</div></div></div>
+      <script>document.fonts.ready.then(()=>setTimeout(()=>print(),300))<\/script></body></html>`);
+    w.document.close();
+  },
+  // ----- daily movement (الحركة اليومية) -----
+  async renderDaily() {
+    const m = $("#amain");
+    S.day ||= new Date(Date.now() + 3 * 3600e3).toISOString().slice(0, 10); // Baghdad date
+    const shift = (n) => { const d = new Date(S.day + "T12:00:00"); d.setDate(d.getDate() + n); S.day = d.toISOString().slice(0, 10); this.renderDaily(); };
+    m.innerHTML = `<div class="spinner" style="margin:40px auto"></div>`;
+    const { data, error } = await rpc0("cash_movements", { p_from: S.day, p_to: S.day });
+    if (error) { m.innerHTML = `<div class="alert bad">${esc(error.message)}</div>`; return; }
+    let bal = Number(data.opening || 0);
+    const rows = (data.rows || []).map((r) => { bal += Number(r.in) - Number(r.out); return { ...r, bal }; });
+    const tin = rows.reduce((a, r) => a + Number(r.in), 0), tout = rows.reduce((a, r) => a + Number(r.out), 0);
+    const n = (v) => (Number(v) ? Number(v).toLocaleString("en-US") : "");
+    m.innerHTML = `
+      <div class="spread no-print"><h2 style="margin:0">الحركة اليومية</h2>
+        <div class="row" style="flex-wrap:nowrap"><button class="btn sm ghost" id="dPrev">→ اليوم السابق</button><input type="date" id="dDay" value="${S.day}" style="width:auto"><button class="btn sm ghost" id="dNext">اليوم التالي ←</button><button class="btn sm" onclick="window.print()">🖨</button></div></div>
+      <h3 class="print-only">الحركة اليومية · ${S.day}</h3>
+      <div class="stats" style="margin-top:12px">
+        <div class="stat"><div class="v">${money(data.opening)}</div><div class="l">رصيد أول اليوم</div></div>
+        <div class="stat"><div class="v neg">${money(tin)}</div><div class="l">الداخل</div></div>
+        <div class="stat"><div class="v pos">${money(tout)}</div><div class="l">الطالع</div></div>
+        <div class="stat"><div class="v">${money(Number(data.opening) + tin - tout)}</div><div class="l">رصيد آخر اليوم</div></div>
+      </div>
+      <div class="card table-wrap" style="margin-top:12px;padding:0"><table><thead><tr><th>الوقت</th><th>السند</th><th>البيان</th><th>الجهة</th><th>داخل</th><th>طالع</th><th>الرصيد</th></tr></thead><tbody>
+        <tr><td></td><td></td><td><b>رصيد أول اليوم</b></td><td></td><td></td><td></td><td class="num"><b>${n(data.opening) || 0}</b></td></tr>
+        ${rows.map((r) => `<tr><td class="num">${String(r.at).slice(11, 16)}</td><td>${r.vno ? `<span class="chip vt-${r.vtype}">${VT[r.vtype] || ""} #${r.vno}</span>` : ""}</td><td>${esc(r.label || "")}</td><td>${esc(r.party || "")}</td>
+          <td class="num neg">${n(r.in)}</td><td class="num pos">${n(r.out)}</td><td class="num"><b>${n(r.bal) || 0}</b></td></tr>`).join("") || `<tr><td colspan="7" class="empty">ماكو حركة بهذا اليوم</td></tr>`}
+        <tr class="tot"><td colspan="4"><b>المجموع</b></td><td class="num neg"><b>${n(tin) || 0}</b></td><td class="num pos"><b>${n(tout) || 0}</b></td><td class="num"><b>${n(Number(data.opening) + tin - tout) || 0}</b></td></tr>
+      </tbody></table></div>
+      <p class="small muted no-print">الحركة تشمل: تسديدات السائقين، سندات القبض والصرف والدفع، الرواتب، ورأس مال وسحوبات الشركاء. العمولة ما تدخل القاصة إلا لما السائق يسددها.</p>`;
+    $("#dPrev").onclick = () => shift(-1); $("#dNext").onclick = () => shift(1);
+    $("#dDay").onchange = (e) => { S.day = e.target.value; this.renderDaily(); };
   },
   // ----- settings -----
   renderSettings() {
@@ -1322,7 +1496,7 @@ const Admin = {
         await adminUsers({ action: "reset_password", user_id: id, password: pw }); toast("تغير الرمز. بلّغه بالرمز الجديد");
       }
       if (act === "addUser") return this.addUserModal(b.dataset.role);
-      if (act === "settle") return this.settleModal(id);
+      if (act === "settle") return this.voucherModal("receive", { party_type: "driver", party_id: id, amount: Math.max(0, Number(S.balances?.[id]?.debt || 0)) || "" });
       if (act === "ledger") return this.ledgerModal(id);
       if (act === "zoneSave") {
         const row = b.closest("[data-zone]");
@@ -1334,26 +1508,27 @@ const Admin = {
         const { error } = await sb.from("zones").update({ active: !z.active }).eq("id", id); if (error) throw error;
         $("#amain").dataset.view = ""; await this.load();
       }
-      if (act === "pWithdraw" || act === "pCapital") {
-        const amt = prompt(act === "pWithdraw" ? "مبلغ السحب:" : "مبلغ رأس المال المدخل:"); if (!amt || !toNum(amt)) return;
-        const note = prompt("ملاحظة (اختياري):") || null;
-        const { error } = await sb.from("partner_transactions").insert({ partner_id: Number(id), kind: act === "pWithdraw" ? "withdrawal" : "capital", amount: toNum(amt), note });
-        if (error) throw error; toast("انسجل"); this.renderAccounts();
-      }
+      if (act === "pWithdraw") return this.voucherModal("pay", { party_type: "partner", party_id: id });
+      if (act === "pCapital") return this.voucherModal("receive", { party_type: "partner", party_id: id });
       if (act === "pShare") {
         const v = prompt("النسبة الجديدة %:", b.dataset.share); if (v === null) return;
         const { error } = await sb.from("partners").update({ share_percent: toNum(v) }).eq("id", id);
         if (error) throw error; this.renderAccounts();
       }
-      if (act === "delExp") { if (!confirm("تحذف هذا المصروف؟")) return; const { error } = await sb.from("expenses").delete().eq("id", id); if (error) throw error; toast("انحذف"); this.renderAccounts(); }
-      if (act === "toggleEmp") { const { data: e } = await sb.from("employees").select("active").eq("id", id).single(); await sb.from("employees").update({ active: !e.active }).eq("id", id); this.renderAccounts(); }
-      if (act === "paySalary") {
-        const amt = prompt("مبلغ الراتب المصروف:", b.dataset.left || ""); if (!amt) return;
-        const month = S.accMonth || new Date().toISOString().slice(0, 7);
-        const today = new Date().toISOString().slice(0, 10);
-        const { error } = await sb.from("expenses").insert({ category: "رواتب", amount: toNum(amt), employee_id: Number(id), salary_month: `${month}-01`, spent_on: today.startsWith(month) ? today : `${month}-01`, note: `راتب ${month}` });
-        if (error) throw error; toast("انسجل الراتب"); this.renderAccounts();
+      if (act === "delExp") {
+        const reason = prompt("سبب الحذف (إجباري):"); if (!reason?.trim()) return toast("لازم تكتب سبب الحذف", true);
+        if (b.dataset.voucher) await rpc("cancel_voucher", { p_id: Number(b.dataset.voucher), p_reason: reason });
+        else { const { error } = await sb.from("expenses").update({ void: true, note: `محذوف: ${reason}` }).eq("id", id); if (error) throw error; }
+        toast("انحذف وانتقل للمحذوفات"); this.renderAccounts();
       }
+      if (act === "newVoucher") return this.voucherModal(b.dataset.type, {});
+      if (act === "printV") return this.printVoucher(Number(id));
+      if (act === "cancelV") {
+        const reason = prompt("سبب الحذف (إجباري):"); if (!reason?.trim()) return toast("لازم تكتب سبب الحذف", true);
+        await rpc("cancel_voucher", { p_id: Number(id), p_reason: reason }); toast("انحذف السند وانتقل للمحذوفات"); this.renderVouchers();
+      }
+      if (act === "toggleEmp") { const { data: e } = await sb.from("employees").select("active").eq("id", id).single(); await sb.from("employees").update({ active: !e.active }).eq("id", id); this.renderAccounts(); }
+      if (act === "paySalary") return this.voucherModal("spend", { category: "رواتب", party_type: "employee", party_id: id, amount: b.dataset.left, salary_month: `${S.accMonth || new Date().toISOString().slice(0, 7)}-01` });
       if (act === "unflag") { await sb.from("flagged_phones").delete().eq("phone", b.dataset.phone); this.renderFlagged(); }
     } catch (err) { toast(errMsg(err), true); }
   },
