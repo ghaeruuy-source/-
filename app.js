@@ -1922,15 +1922,38 @@ const Admin = {
         <div class="field"><label>رقم الموبايل (يستعمله للدخول)</label><input name="phone" type="tel" inputmode="tel" required></div>
         <div class="field"><label>الرمز (6 أحرف أو أكثر)</label><input name="password" class="ltr" required minlength="6" value="${Math.random().toString().slice(2, 8)}"></div>
         ${isR ? `<div class="field"><label>العنوان</label><input name="address"></div>
-          <div class="field"><label>المنطقة</label><select name="zone_id"><option value="">—</option>${S.zones.map((z) => `<option value="${z.id}">${esc(z.name)}</option>`).join("")}</select></div>`
+          <div class="field"><label>المنطقة</label><input name="zone_name" list="zoneDl" placeholder="اكتب اسم المنطقة..." autocomplete="off"><datalist id="zoneDl">${S.zones.map((z) => `<option value="${esc(z.name)}">`).join("")}</datalist>
+            <div class="small muted" id="zoneHint" style="margin-top:4px"></div></div>
+          <div class="field" id="zoneFeeF" hidden><label>أجرة التوصيل للمنطقة الجديدة (د.ع)</label><input name="zone_fee" inputmode="numeric" class="ltr" placeholder="مثلاً 3000"></div>`
         : `<div class="field"><label>نوع المركبة / رقمها (اختياري)</label><input name="vehicle"></div>`}
         <div class="row" style="flex-wrap:nowrap"><button class="btn primary" style="flex:1">إنشاء الحساب</button><button type="button" class="btn ghost" data-close>إلغاء</button></div>
       </form>`, (bg, close) => {
+      const findZone = (n) => S.zones.find((z) => z.name.trim() === String(n || "").trim());
+      const zi = $("#uForm [name=zone_name]", bg);
+      if (zi) zi.oninput = () => {
+        const n = zi.value.trim(), z = findZone(n), isNew = n && !z;
+        $("#zoneFeeF", bg).hidden = !isNew;
+        $("#zoneHint", bg).textContent = z ? `✓ منطقة موجودة · التوصيل ${Number(z.delivery_fee).toLocaleString("en-US")} د.ع` : isNew ? "منطقة جديدة، راح تنضاف لقائمة المناطق" : "";
+      };
       $("#uForm", bg).onsubmit = async (e) => {
         e.preventDefault();
         const f = Object.fromEntries(new FormData(e.target)); const btn = e.target.querySelector("button"); btn.disabled = true;
         try {
-          await adminUsers({ action: "create", role, ...f, zone_id: f.zone_id ? Number(f.zone_id) : null });
+          let zone_id = null;
+          const zn = String(f.zone_name || "").trim();
+          if (zn) {
+            const z = findZone(zn);
+            if (z) zone_id = z.id;
+            else {
+              const fee = toNum(f.zone_fee);
+              if (!fee) throw new Error("اكتب أجرة التوصيل للمنطقة الجديدة");
+              const { data: nz, error } = await sb.from("zones").insert({ name: zn, delivery_fee: fee }).select().single();
+              if (error) throw new Error(error.code === "42501" ? "ما عندك صلاحية تضيف مناطق" : error.message.includes("duplicate") ? "المنطقة موجودة" : error.message);
+              S.zones.push(nz); zone_id = nz.id;
+            }
+          }
+          delete f.zone_name; delete f.zone_fee;
+          await adminUsers({ action: "create", role, ...f, zone_id });
           close();
           const link = location.origin + location.pathname;
           modal(`<h3>تم ✓</h3><p>دز هذي المعلومات لـ ${esc(f.name)}:</p>
