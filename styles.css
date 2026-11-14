@@ -370,3 +370,13 @@ tr.voided-soft td { color: var(--ink-2); }
 .pd-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
 .pd-item { display: flex; justify-content: space-between; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px; }
 #plateRow[hidden], #noPlateNote[hidden], .veh-grid [hidden] { display: none !important; }
+/* big add-driver modal */
+.modal.xl { max-width: 980px; width: 100%; padding: 24px 28px; }
+@media (min-width: 900px) {
+  .modal.xl #uForm { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px 16px; align-items: start; }
+  .modal.xl #uForm > .field:has(#vehSeg), .modal.xl #uForm > #plateRow { grid-column: span 3; }
+  .modal.xl #uForm > .alert, .modal.xl #uForm > .veh-grid, .modal.xl #uForm > .field:has(#pdType), .modal.xl #uForm > .row { grid-column: 1 / -1; }
+  .modal.xl .veh-grid { grid-template-columns: repeat(3, 1fr); gap: 0 16px; }
+  .modal.xl .seg-wide { max-width: 520px; }
+  .modal.xl #uForm > .row .btn { padding: 14px; font-size: 16px; }
+}

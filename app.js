@@ -2043,6 +2043,7 @@ const Admin = {
         : vehFormHtml("motorcycle") + docPickerHtml()}
         <div class="row" style="flex-wrap:nowrap"><button class="btn primary" style="flex:1">إنشاء الحساب</button><button type="button" class="btn ghost" data-close>إلغاء</button></div>
       </form>`, (bg, close) => {
+      if (!isR) bg.querySelector(".modal").classList.add("xl");
       bindVehSeg(bg);
       const pending = []; let pdType = DOC_TYPES[0];
       const pdRender = () => { $("#pdList", bg).innerHTML = pending.map((x, i) => `<div class="pd-item"><span>📎 <b>${esc(x.type)}</b> · <span class="small muted">${esc(x.file.name)}</span></span><button type="button" class="btn sm ghost" data-pdrm="${i}">✕</button></div>`).join("") || `<div class="small muted">ما مضاف شي بعد. اختار النوع وأضف الصورة.</div>`; };
