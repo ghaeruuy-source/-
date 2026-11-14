@@ -1,0 +1,14 @@
+alter function public.haversine_km(double precision, double precision, double precision, double precision) set search_path = public;
+alter function public.normalize_phone(text) set search_path = public;
+revoke execute on function public.admin_ledger_entry(uuid, numeric, text, text) from public, anon;
+revoke execute on function public.cancel_order(bigint, text) from public, anon;
+revoke execute on function public.check_phone(text) from public, anon;
+revoke execute on function public.create_order(text, text, bigint, text, numeric, text, double precision, double precision, uuid) from public, anon;
+revoke execute on function public.driver_location(double precision, double precision) from public, anon;
+revoke execute on function public.driver_respond(bigint, boolean) from public, anon;
+revoke execute on function public.driver_set_online(boolean) from public, anon;
+revoke execute on function public.driver_update_status(bigint, text, text) from public, anon;
+revoke execute on function public.restaurant_set_location(double precision, double precision) from public, anon;
+revoke execute on function public.driver_debt(uuid) from public, anon, authenticated;
+revoke execute on function public.sweep_dispatch() from authenticated;
+select cron.schedule('cleanup-cron-log', '17 3 * * *', $$delete from cron.job_run_details where end_time < now() - interval '1 day'$$);
