@@ -223,3 +223,15 @@ body.live-mode #amain { position: fixed; top: var(--live-top, 120px); left: 0; r
 input[type=month], input[type=date] { direction: ltr; }
 button, input, select, textarea { font-family: inherit; }
 .btn { white-space: nowrap; }
+.leaflet-container, .leaflet-popup-content { font-family: inherit !important; }
+.acc-line { display: flex; justify-content: space-between; gap: 10px; padding: 7px 0; border-bottom: 1px dashed var(--line); font-size: 15px; }
+.acc-line:last-child { border-bottom: 0; }
+.acc-line.total { border-top: 2px solid var(--ink); border-bottom: 0; margin-top: 4px; padding-top: 10px; font-size: 18px; }
+.partner { padding: 10px 0; border-bottom: 1px solid var(--line); }
+.partner:last-of-type { border-bottom: 0; }
+@media print {
+  .topbar, .tabs, .no-print, .toast { display: none !important; }
+  body { background: #fff; }
+  .card, .stat { box-shadow: none; break-inside: avoid; }
+  .wrap { max-width: none; padding: 0; }
+}

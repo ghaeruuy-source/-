@@ -69,6 +69,7 @@ async function rpc(name, args) {
   if (error) throw error;
   return data;
 }
+const rpc0 = (name, args) => sb.rpc(name, args);
 async function adminUsers(body) {
   const { data: { session } } = await sb.auth.getSession();
   const r = await fetch(`${C.supabaseUrl}/functions/v1/admin-users`, {
@@ -787,17 +788,18 @@ const Admin = {
   },
   render(soft = false) {
     const active = S.orders.filter((o) => ACTIVE.includes(o.status));
-    const tabs = [["live", `الرئيسية${active.length ? `<span class="pill-count">${active.length}</span>` : ""}`], ["map", "🗺 الخريطة"], ["drivers", "السائقين"], ["restaurants", "المطاعم"], ["orders", "كل الطلبات"], ["accounts", "الحسابات"], ["zones", "المناطق والأجور"], ["flagged", "أرقام مرفوضة"], ["settings", "الإعدادات"]];
+    const tabs = [["live", `الرئيسية${active.length ? `<span class="pill-count">${active.length}</span>` : ""}`], ["map", "🗺 الخريطة"], ["drivers", "السائقين"], ["restaurants", "المطاعم"], ["orders", "كل الطلبات"], ["accounts", "الحسابات"], ["reports", "التقارير"], ["zones", "المناطق والأجور"], ["flagged", "أرقام مرفوضة"], ["settings", "الإعدادات"]];
     $("#atabs").innerHTML = tabs.map(([k, l]) => `<button class="tab ${S.tab === k ? "on" : ""}" data-tab="${k}">${l}</button>`).join("");
     const m = $("#amain");
     // forms shouldn't be wiped by realtime updates
-    if (soft && ["settings", "zones", "flagged", "accounts", "orders"].includes(S.tab) && m.dataset.view === S.tab) return;
+    if (soft && ["settings", "zones", "flagged", "accounts", "orders", "reports"].includes(S.tab) && m.dataset.view === S.tab) return;
     document.body.classList.toggle("live-mode", S.tab === "map");
     if (S.tab !== "map" && S.maps.admin) { S.maps.admin.remove(); S.maps.admin = null; S.markers = {}; S.fitted = false; }
     m.dataset.view = S.tab;
     if (S.tab === "live") return this.renderLive();
     if (S.tab === "map") return this.renderMap();
     if (S.tab === "accounts") return this.renderAccounts();
+    if (S.tab === "reports") return this.renderReports();
     if (S.tab === "drivers") return this.renderDrivers();
     if (S.tab === "restaurants") return this.renderRestaurants();
     if (S.tab === "zones") return this.renderZones();
@@ -1068,12 +1070,14 @@ const Admin = {
     const from = new Date(y, mo - 1, 1), to = new Date(y, mo, 1);
     const fromD = `${month}-01`, toD = `${to.getFullYear()}-${String(to.getMonth() + 1).padStart(2, "0")}-01`;
     m.innerHTML = `<div class="spinner" style="margin:40px auto"></div>`;
-    const [od, lg, ex, em] = await Promise.all([
+    const [od, lg, ex, em, ft] = await Promise.all([
       sb.from("orders").select("id,commission,delivery_fee,driver_id").eq("status", "delivered").gte("delivered_at", from.toISOString()).lt("delivered_at", to.toISOString()).limit(10000),
       sb.from("ledger").select("amount,kind,driver_id").gte("created_at", from.toISOString()).lt("created_at", to.toISOString()).limit(10000),
       sb.from("expenses").select("*").gte("spent_on", fromD).lt("spent_on", toD).order("spent_on", { ascending: false }),
       sb.from("employees").select("*").order("active", { ascending: false }).order("name"),
+      sb.rpc("finance_totals"),
     ]);
+    const T = ft.data || {};
     if (ex.error) { m.innerHTML = `<div class="alert bad">${esc(ex.error.message)}</div>`; return; }
     const orders = od.data || [], ledger = lg.data || [], exps = ex.data || [], emps = em.data || [];
     const commission = orders.reduce((a, o) => a + Number(o.commission), 0);
@@ -1086,8 +1090,41 @@ const Admin = {
     const paid = {}; exps.filter((e) => e.employee_id).forEach((e) => (paid[e.employee_id] = (paid[e.employee_id] || 0) + Number(e.amount)));
     const CATS = ["إيجار", "وقود", "إعلانات", "اتصالات وإنترنت", "صيانة", "مكتب ولوازم", "أخرى"];
     const today = new Date().toISOString().slice(0, 10);
+    const allNet = Number(T.commission || 0) + Number(T.adjustments || 0) - Number(T.salaries || 0) - Number(T.expenses || 0);
+    const cashIn = Number(T.received || 0) + Number(T.capital || 0);
+    const cashOut = Number(T.expenses || 0) + Number(T.salaries || 0) + Number(T.withdrawals || 0);
+    const partners = T.partners || [];
+    const shareSum = partners.filter((p) => p.active).reduce((a, p) => a + Number(p.share), 0);
     m.innerHTML = `
-      <div class="spread"><h2 style="margin:0">الحسابات</h2><input type="month" id="accMonth" value="${month}" style="width:auto"></div>
+      <h2 style="margin:0 0 12px">الحسابات</h2>
+      <div class="dash" style="margin-top:0">
+        <section class="card">
+          <h3>💰 القاصة (النقد اللي عندكم هسه)</h3>
+          <div class="acc-line"><span>استلمتوا من السائقين (عمولات)</span><b class="neg">+${money(T.received)}</b></div>
+          <div class="acc-line"><span>رأس مال دخّله الشركاء</span><b class="neg">+${money(T.capital)}</b></div>
+          <div class="acc-line"><span>مصاريف</span><b class="pos">−${money(T.expenses)}</b></div>
+          <div class="acc-line"><span>رواتب</span><b class="pos">−${money(T.salaries)}</b></div>
+          <div class="acc-line"><span>سحوبات الشركاء</span><b class="pos">−${money(T.withdrawals)}</b></div>
+          <div class="acc-line total"><span>الرصيد بالقاصة</span><b>${money(cashIn - cashOut)}</b></div>
+          <p class="small muted" style="margin:8px 0 0">وبرّه القاصة: ديون على السائقين ما استلمتوها بعد <b>${money(T.debt)}</b></p>
+        </section>
+        <section class="card">
+          <h3>🤝 الشركاء</h3>
+          ${partners.length && Math.abs(shareSum - 100) > 0.01 ? `<div class="alert warn small" style="margin-bottom:8px">مجموع النسب ${shareSum}% لازم يكون 100%</div>` : ""}
+          <p class="small muted" style="margin:-6px 0 8px">صافي ربح الشركة من البداية: <b>${money(allNet)}</b> (العمولات − الرواتب − المصاريف)</p>
+          ${partners.map((p) => { const due = allNet * Number(p.share) / 100 - Number(p.withdrawals);
+            return `<div class="partner"><div class="spread"><b>${esc(p.name)} · ${Number(p.share)}%</b>
+              <div class="row" style="flex-wrap:nowrap"><button class="btn sm ok" data-act="pWithdraw" data-id="${p.id}">سحب</button><button class="btn sm" data-act="pCapital" data-id="${p.id}">رأس مال</button><button class="btn sm ghost" data-act="pShare" data-id="${p.id}" data-share="${p.share}">النسبة</button></div></div>
+              <div class="small muted">حصته من الربح ${money(allNet * Number(p.share) / 100)} · سحب ${money(p.withdrawals)} · رأس ماله ${money(p.capital)}</div>
+              <div class="small">باقي إله: <b class="${due >= 0 ? "neg" : "pos"}">${money(due)}</b></div></div>`; }).join("") || `<div class="empty">ضيف الشريكين ونسبة كل واحد</div>`}
+          <form id="partnerForm" class="exp-form" style="margin-top:10px">
+            <input name="name" placeholder="اسم الشريك" required>
+            <input name="share" inputmode="numeric" class="ltr" placeholder="النسبة %" required>
+            <button class="btn dark">إضافة شريك</button>
+          </form>
+        </section>
+      </div>
+      <div class="spread" style="margin-top:24px"><h2 style="margin:0">حسابات الشهر</h2><input type="month" id="accMonth" value="${month}" style="width:auto"></div>
       <div class="stats five" style="margin-top:12px">
         <div class="stat"><div class="v">${money(commission)}</div><div class="l">العمولات (${orders.length} طلب)</div></div>
         <div class="stat"><div class="v">${money(received)}</div><div class="l">استلمت من السائقين</div></div>
@@ -1126,6 +1163,12 @@ const Admin = {
           </form>
         </section>
       </div>`;
+    $("#partnerForm").onsubmit = async (e) => {
+      e.preventDefault(); const f = e.target;
+      const { error } = await sb.from("partners").insert({ name: f.name.value.trim(), share_percent: toNum(f.share.value) });
+      if (error) return toast(errMsg(error), true);
+      toast("انضاف الشريك"); this.renderAccounts();
+    };
     $("#accMonth").onchange = (e) => { S.accMonth = e.target.value || month; this.renderAccounts(); };
     $("#expForm").onsubmit = async (e) => {
       e.preventDefault(); const f = e.target;
@@ -1138,6 +1181,81 @@ const Admin = {
       const { error } = await sb.from("employees").insert({ name: f.name.value.trim(), job: f.job.value || null, monthly_salary: toNum(f.monthly_salary.value) });
       if (error) return toast(errMsg(error), true);
       toast("انضاف الموظف"); this.renderAccounts();
+    };
+  },
+  // ----- reports -----
+  async renderReports() {
+    const m = $("#amain");
+    const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const now = new Date();
+    const presets = {
+      today: ["اليوم", iso(now), iso(now)],
+      yesterday: ["أمس", iso(new Date(now - 864e5)), iso(new Date(now - 864e5))],
+      week: ["آخر 7 أيام", iso(new Date(now - 6 * 864e5)), iso(now)],
+      month: ["هذا الشهر", iso(new Date(now.getFullYear(), now.getMonth(), 1)), iso(now)],
+      last: ["الشهر الماضي", iso(new Date(now.getFullYear(), now.getMonth() - 1, 1)), iso(new Date(now.getFullYear(), now.getMonth(), 0))],
+    };
+    S.rep ||= { key: "month", from: presets.month[1], to: presets.month[2] };
+    m.innerHTML = `<div class="card no-print"><div class="row">
+        ${Object.entries(presets).map(([k, [l]]) => `<button class="btn sm ${S.rep.key === k ? "dark" : "ghost"}" data-preset="${k}">${l}</button>`).join("")}
+        <span class="row" style="flex-wrap:nowrap;margin-inline-start:auto"><input type="date" id="rFrom" value="${S.rep.from}" style="width:auto"> إلى <input type="date" id="rTo" value="${S.rep.to}" style="width:auto"><button class="btn sm dark" id="rGo">عرض</button></span>
+      </div></div><div id="repOut"><div class="spinner" style="margin:40px auto"></div></div>`;
+    m.querySelectorAll("[data-preset]").forEach((b) => (b.onclick = () => { const [, f, t] = presets[b.dataset.preset]; S.rep = { key: b.dataset.preset, from: f, to: t }; this.renderReports(); }));
+    $("#rGo").onclick = () => { S.rep = { key: "custom", from: $("#rFrom").value, to: $("#rTo").value }; this.renderReports(); };
+    const [{ data: R, error }, { data: T }] = await Promise.all([rpc0("profit_report", { p_from: S.rep.from, p_to: S.rep.to }), rpc0("finance_totals")]);
+    if (error) { $("#repOut").innerHTML = `<div class="alert bad">${esc(error.message)}</div>`; return; }
+    const net = Number(R.commission) - Number(R.salaries) - Number(R.expenses);
+    const partners = (T?.partners || []).filter((p) => p.active);
+    const n = (v) => Number(v || 0).toLocaleString("en-US");
+    const tbl = (head, rows) => `<div class="table-wrap"><table><thead><tr>${head.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.join("") || `<tr><td colspan="${head.length}" class="empty">ماكو بيانات</td></tr>`}</tbody></table></div>`;
+    const st = R.by_status || {};
+    const totalOrders = Object.values(st).reduce((a, v) => a + v, 0);
+    $("#repOut").innerHTML = `
+      <div class="spread" style="margin:16px 0 8px"><h2 style="margin:0">تقرير الأرباح · من <span class="num">${S.rep.from}</span> إلى <span class="num">${S.rep.to}</span></h2>
+        <div class="row no-print"><button class="btn sm" id="rCsv">⬇ تنزيل Excel</button><button class="btn sm" onclick="window.print()">🖨 طباعة</button></div></div>
+      <div class="stats five">
+        <div class="stat"><div class="v">${money(R.commission)}</div><div class="l">العمولات (الإيراد)</div></div>
+        <div class="stat"><div class="v">${money(R.salaries)}</div><div class="l">الرواتب</div></div>
+        <div class="stat"><div class="v">${money(R.expenses)}</div><div class="l">المصاريف</div></div>
+        <div class="stat ${net >= 0 ? "good" : "badv"}"><div class="v">${money(net)}</div><div class="l">صافي الربح</div></div>
+        <div class="stat"><div class="v">${money(R.received)}</div><div class="l">نقد استلمتوه من السائقين</div></div>
+      </div>
+      <div class="dash">
+        <section class="card"><h3>توزيع الربح على الشركاء</h3>
+          ${partners.length ? partners.map((p) => `<div class="acc-line"><span>${esc(p.name)} (${Number(p.share)}%)</span><b>${money(net * Number(p.share) / 100)}</b></div>`).join("") : `<div class="small muted">ضيف الشركاء ونسبهم من تبويب الحسابات.</div>`}
+          <div class="hr"></div>
+          <h3>الطلبات</h3>
+          <div class="acc-line"><span>كل الطلبات</span><b class="num">${totalOrders}</b></div>
+          <div class="acc-line"><span>توصّلت</span><b class="num">${n(R.orders)}</b></div>
+          <div class="acc-line"><span>رفض / ما رد</span><b class="num">${n(st.refused)}</b></div>
+          <div class="acc-line"><span>ملغية</span><b class="num">${n(st.cancelled)}</b></div>
+          <div class="acc-line"><span>قيمة الطلبات الموصلة</span><b>${money(R.order_value)}</b></div>
+          <div class="acc-line"><span>أجور التوصيل (للسائقين)</span><b>${money(R.delivery_fees)}</b></div>
+          <div class="acc-line"><span>معدل العمولة بالطلب</span><b>${money(R.orders ? Math.round(R.commission / R.orders) : 0)}</b></div>
+          ${Object.keys(R.by_category || {}).length ? `<div class="hr"></div><h3>المصاريف حسب النوع</h3>${Object.entries(R.by_category).sort((a, b) => b[1] - a[1]).map(([c, v]) => `<div class="acc-line"><span>${esc(c)}</span><b>${money(v)}</b></div>`).join("")}` : ""}
+        </section>
+        <section class="card"><h3>يوم بيوم</h3>
+          ${tbl(["اليوم", "طلبات", "عمولة", "مصروف", "الصافي", "نقد مستلم"], (R.by_day || []).filter((d) => d.orders || d.spent || d.received).reverse().map((d) => `<tr><td class="num">${d.day}</td><td class="num">${d.orders}</td><td class="num">${n(d.commission)}</td><td class="num">${n(d.spent)}</td><td class="num ${d.commission - d.spent >= 0 ? "neg" : "pos"}">${n(d.commission - d.spent)}</td><td class="num">${n(d.received)}</td></tr>`))}
+        </section>
+      </div>
+      <section class="card" style="margin-top:16px"><h3>حسب السائق</h3>
+        ${tbl(["السائق", "طلبات", "أجور توصيل", "عمولة", "سدد بالفترة", "دينه هسه"], (R.by_driver || []).map((r) => `<tr><td>${esc(r.name)}</td><td class="num">${r.orders}</td><td class="num">${n(r.fees)}</td><td class="num">${n(r.commission)}</td><td class="num">${n(r.paid)}</td><td class="num ${r.debt_now > 0 ? "pos" : ""}">${n(r.debt_now)}</td></tr>`))}</section>
+      <div class="dash">
+        <section class="card"><h3>حسب المطعم</h3>
+          ${tbl(["المطعم", "طلبات", "قيمة الطلبات", "عمولة"], (R.by_restaurant || []).map((r) => `<tr><td>${esc(r.name)}</td><td class="num">${r.orders}</td><td class="num">${n(r.value)}</td><td class="num">${n(r.commission)}</td></tr>`))}</section>
+        <section class="card"><h3>حسب المنطقة</h3>
+          ${tbl(["المنطقة", "طلبات", "أجور توصيل", "عمولة"], (R.by_zone || []).map((r) => `<tr><td>${esc(r.name)}</td><td class="num">${r.orders}</td><td class="num">${n(r.fees)}</td><td class="num">${n(r.commission)}</td></tr>`))}</section>
+      </div>`;
+    $("#rCsv").onclick = () => {
+      const rows = [["تقرير الأرباح", S.rep.from, S.rep.to], [], ["العمولات", R.commission], ["الرواتب", R.salaries], ["المصاريف", R.expenses], ["صافي الربح", net], ["نقد مستلم", R.received], [],
+        ...partners.map((p) => [`حصة ${p.name} (${p.share}%)`, Math.round(net * p.share / 100)]), [],
+        ["اليوم", "طلبات", "عمولة", "مصروف", "الصافي", "نقد مستلم"], ...(R.by_day || []).map((d) => [d.day, d.orders, d.commission, d.spent, d.commission - d.spent, d.received]), [],
+        ["السائق", "طلبات", "أجور توصيل", "عمولة", "سدد", "دينه هسه"], ...(R.by_driver || []).map((r) => [r.name, r.orders, r.fees, r.commission, r.paid, r.debt_now]), [],
+        ["المطعم", "طلبات", "قيمة الطلبات", "عمولة"], ...(R.by_restaurant || []).map((r) => [r.name, r.orders, r.value, r.commission]), [],
+        ["المنطقة", "طلبات", "أجور توصيل", "عمولة"], ...(R.by_zone || []).map((r) => [r.name, r.orders, r.fees, r.commission])];
+      const csv = "﻿" + rows.map((r) => r.map((c) => `"${String(c ?? "").replace(/"/g, '""')}"`).join(",")).join("\r\n");
+      const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+      a.download = `تقرير-${S.rep.from}-${S.rep.to}.csv`; a.click();
     };
   },
   // ----- settings -----
@@ -1215,6 +1333,17 @@ const Admin = {
         const z = S.zones.find((x) => String(x.id) === id);
         const { error } = await sb.from("zones").update({ active: !z.active }).eq("id", id); if (error) throw error;
         $("#amain").dataset.view = ""; await this.load();
+      }
+      if (act === "pWithdraw" || act === "pCapital") {
+        const amt = prompt(act === "pWithdraw" ? "مبلغ السحب:" : "مبلغ رأس المال المدخل:"); if (!amt || !toNum(amt)) return;
+        const note = prompt("ملاحظة (اختياري):") || null;
+        const { error } = await sb.from("partner_transactions").insert({ partner_id: Number(id), kind: act === "pWithdraw" ? "withdrawal" : "capital", amount: toNum(amt), note });
+        if (error) throw error; toast("انسجل"); this.renderAccounts();
+      }
+      if (act === "pShare") {
+        const v = prompt("النسبة الجديدة %:", b.dataset.share); if (v === null) return;
+        const { error } = await sb.from("partners").update({ share_percent: toNum(v) }).eq("id", id);
+        if (error) throw error; this.renderAccounts();
       }
       if (act === "delExp") { if (!confirm("تحذف هذا المصروف؟")) return; const { error } = await sb.from("expenses").delete().eq("id", id); if (error) throw error; toast("انحذف"); this.renderAccounts(); }
       if (act === "toggleEmp") { const { data: e } = await sb.from("employees").select("active").eq("id", id).single(); await sb.from("employees").update({ active: !e.active }).eq("id", id); this.renderAccounts(); }
