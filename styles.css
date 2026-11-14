@@ -344,3 +344,6 @@ tr.tot td { border-top: 2px solid var(--ink); background: var(--surface-2); }
 .bar-row { display: grid; grid-template-columns: minmax(90px, 30%) 1fr auto; gap: 10px; align-items: center; padding: 6px 0; font-size: 14px; }
 .bar { background: var(--surface-2); border-radius: 999px; height: 10px; overflow: hidden; }
 .bar i { display: block; height: 100%; background: var(--bad); border-radius: 999px; }
+.btn.danger { color: var(--bad); }
+.removed-box { margin-top: 16px; }
+tr.voided-soft td { color: var(--ink-2); }

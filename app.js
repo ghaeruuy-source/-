@@ -1022,9 +1022,34 @@ const Admin = {
       }
     }
   },
+  removedList(role) {
+    const xs = S.people.filter((p) => p.role === role && p.removed_at);
+    if (!xs.length) return "";
+    return `<details class="add-box removed-box"><summary>🗑 ${role === "driver" ? "السواق" : "المطاعم"} المحذوفين (${xs.length})</summary>
+      <div class="card table-wrap" style="padding:0;margin-top:8px"><table><thead><tr><th>الاسم</th><th>الرقم</th><th>انحذف</th><th>السبب</th>${role === "driver" ? "<th>دينه</th>" : ""}<th></th></tr></thead><tbody>
+      ${xs.map((x) => `<tr class="voided-soft"><td><b>${esc(x.name)}</b></td><td class="num">${esc(x.phone || "")}</td><td class="num">${dateTime(x.removed_at)}</td><td>${esc(x.removed_reason || "")}</td>
+        ${role === "driver" ? `<td>${money(S.balances?.[x.id]?.debt || 0)}</td>` : ""}
+        <td><div class="row" style="flex-wrap:nowrap">${canTab("statement") ? `<button class="btn sm ghost" data-act="stmt" data-type="${role}" data-id="${x.id}">كشف حساب</button>` : ""}<button class="btn sm" data-act="restoreAcc" data-id="${x.id}">إرجاع</button></div></td></tr>`).join("")}
+      </tbody></table></div></details>`;
+  },
+  removeModal(id) {
+    const p = S.people.find((x) => x.id === id); if (!p) return;
+    const debt = p.role === "driver" ? Number(S.balances?.[id]?.debt || 0) : 0;
+    modal(`<h3>🗑 حذف ${p.role === "driver" ? "السائق" : "المطعم"}: ${esc(p.name)}</h3>
+      <p class="small muted">الحساب ينقفل وما يكدر يدخل، ويختفي من القوائم. حساباته وطلباته القديمة تبقى محفوظة، وتكدر ترجعه من قائمة المحذوفين.</p>
+      ${debt > 0 ? `<div class="alert warn small">انتبه: عليه دين <b>${money(debt)}</b> ما مسدد. الدين يبقى محفوظ بكشف حسابه.</div>` : ""}
+      <form id="rmForm"><div class="field"><label>سبب الحذف (لازم)</label><input name="reason" required placeholder="مثلاً: ترك الشغل"></div>
+      <div class="row" style="flex-wrap:nowrap"><button class="btn bad" style="flex:1">حذف</button><button type="button" class="btn ghost" data-close>إلغاء</button></div></form>`, (bg, close) => {
+      $("#rmForm", bg).onsubmit = async (e) => {
+        e.preventDefault(); const btn = e.target.querySelector("button"); btn.disabled = true;
+        try { await rpc("archive_account", { p_id: id, p_reason: e.target.reason.value }); close(); toast("انحذف"); await this.load(); this.render(); }
+        catch (err) { toast(errMsg(err), true); btn.disabled = false; }
+      };
+    });
+  },
   // ----- drivers -----
   renderDrivers() {
-    const ds = S.people.filter((p) => p.role === "driver");
+    const ds = S.people.filter((p) => p.role === "driver" && !p.removed_at);
     const cap = Number(S.settings?.debt_cap || 0);
     $("#amain").innerHTML = `<div class="spread"><h2 style="margin:0">السائقين (${ds.length})</h2><button class="btn primary" data-act="addUser" data-role="driver">+ سائق جديد</button></div>
       <div class="card table-wrap" style="margin-top:12px;padding:0">
@@ -1041,12 +1066,13 @@ const Admin = {
           <button class="btn sm" data-act="${canTab("statement") ? "stmt" : "ledger"}" data-type="driver" data-id="${d.id}">كشف حساب</button>
           <button class="btn sm ghost" data-act="toggleActive" data-id="${d.id}">${d.active ? "إيقاف" : "تفعيل"}</button>
           <button class="btn sm ghost" data-act="resetPw" data-id="${d.id}">رمز جديد</button>
+          <button class="btn sm ghost danger" data-act="removeAcc" data-id="${d.id}">حذف</button>
         </div></td></tr>`; }).join("") || `<tr><td colspan="6" class="empty">ماكو سائقين. ضيف أول سائق.</td></tr>`}
-      </tbody></table></div>`;
+      </tbody></table></div>${this.removedList("driver")}`;
   },
   // ----- restaurants -----
   renderRestaurants() {
-    const rs = S.people.filter((p) => p.role === "restaurant");
+    const rs = S.people.filter((p) => p.role === "restaurant" && !p.removed_at);
     const today = S.orders.filter((o) => o.created_at >= startOfToday());
     $("#amain").innerHTML = `<div class="spread"><h2 style="margin:0">المطاعم والمحلات (${rs.length})</h2><button class="btn primary" data-act="addUser" data-role="restaurant">+ مطعم جديد</button></div>
       <div class="card table-wrap" style="margin-top:12px;padding:0">
@@ -1061,8 +1087,9 @@ const Admin = {
           ${canTab("statement") ? `<button class="btn sm" data-act="stmt" data-type="restaurant" data-id="${r.id}">كشف حساب</button>` : ""}
           <button class="btn sm ghost" data-act="toggleActive" data-id="${r.id}">${r.active ? "إيقاف" : "تفعيل"}</button>
           <button class="btn sm ghost" data-act="resetPw" data-id="${r.id}">رمز جديد</button>
+          <button class="btn sm ghost danger" data-act="removeAcc" data-id="${r.id}">حذف</button>
         </div></td></tr>`).join("") || `<tr><td colspan="6" class="empty">ماكو مطاعم. ضيف أول مطعم.</td></tr>`}
-      </tbody></table></div>
+      </tbody></table></div>${this.removedList("restaurant")}
       <p class="small muted">موقع المطعم يتحدد من موبايل المطعم نفسه أول مرة يطلب سائق (أو من زر "حدد موقعي").</p>`;
   },
   // ----- zones -----
@@ -1368,7 +1395,7 @@ const Admin = {
     if (!S.cats) await this.loadVoucherRefs();
     { const { data } = await sb.from("cash_boxes").select("*").eq("active", true).order("is_default", { ascending: false }).order("id"); S.boxes = data || []; }
     const defBox = pre.box_id || S.boxes.find((b) => b.is_default)?.id || S.boxes[0]?.id || "";
-    const drivers = S.people.filter((p) => p.role === "driver");
+    const drivers = S.people.filter((p) => p.role === "driver" && (!p.removed_at || Number(S.balances?.[p.id]?.debt || 0) > 0));
     const today = bgDay();
     const parties = type === "receive" ? [["driver", "سائق (تسديد دين)"], ["partner", "شريك (رأس مال)"], ["other", "جهة أخرى (إيراد)"]]
       : type === "pay" ? [["partner", "شريك (سحب)"], ["driver", "سائق"], ["employee", "موظف (سلفة)"], ["other", "جهة أخرى"]]
@@ -1749,6 +1776,8 @@ const Admin = {
         await adminUsers({ action: "reset_password", user_id: id, password: pw }); toast("تغير الرمز. بلّغه بالرمز الجديد");
       }
       if (act === "addUser") return this.addUserModal(b.dataset.role);
+      if (act === "removeAcc") return this.removeModal(id);
+      if (act === "restoreAcc") { if (!confirm(`إرجاع ${person?.name}؟ يرجع حسابه فعّال ويكدر يدخل.`)) return; await rpc("restore_account", { p_id: id }); toast("رجع الحساب"); await this.load(); return this.render(); }
       if (act === "permUser") return this.permModal(id || null);
       if (act === "stmClear") { S.stm.id = ""; return this.renderStatement(); }
       if (act === "stmt") { S.stm = { ...(S.stm || {}), type: b.dataset.type, id }; S.tab = "statement"; return this.render(); }
@@ -1839,7 +1868,7 @@ const Admin = {
   renderUsers() {
     const me = S.profile.id;
     const admins = S.people.filter((p) => p.role === "admin");
-    const others = S.people.filter((p) => p.role !== "admin");
+    const others = S.people.filter((p) => p.role !== "admin" && !p.removed_at);
     const permsTxt = (p) => !p.permissions ? `<span class="chip st-delivered">مدير كامل</span>` : p.permissions.length ? p.permissions.map((k) => `<span class="chip">${(PERMS.find((x) => x[0] === k) || [k, k])[1]}</span>`).join(" ") : `<span class="chip st-cancelled">بدون صلاحيات</span>`;
     const ROLE = { admin: "إدارة", driver: "سائق", restaurant: "مطعم" };
     $("#amain").innerHTML = `
