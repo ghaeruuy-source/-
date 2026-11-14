@@ -347,3 +347,9 @@ tr.tot td { border-top: 2px solid var(--ink); background: var(--surface-2); }
 .btn.danger { color: var(--bad); }
 .removed-box { margin-top: 16px; }
 tr.voided-soft td { color: var(--ink-2); }
+.place-gate { text-align: center; }
+.place-gate .pg-icon { font-size: 44px; line-height: 1; margin: 4px 0 8px; }
+.place-gate h2 { margin: 0 0 6px; }
+.place-gate .field { text-align: start; }
+.pg-map { height: 300px; border-radius: 12px; margin-top: 4px; }
+.bad-t { color: var(--bad, #c62828); font-weight: 600; }

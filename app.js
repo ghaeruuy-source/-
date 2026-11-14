@@ -390,6 +390,8 @@ const Restaurant = {
       .subscribe();
   },
   render() {
+    if (S.profile.lat == null || S.placeEdit) return this.placeGate();
+    $("#rtabs").hidden = false;
     const active = S.orders.filter((o) => ACTIVE.includes(o.status));
     $("#rtabs").innerHTML = [["new", "طلب سائق"], ["active", `النشطة${active.length ? `<span class="pill-count">${active.length}</span>` : ""}`], ["history", "السجل"]]
       .map(([k, l]) => `<button class="tab ${S.tab === k ? "on" : ""}" data-tab="${k}">${l}</button>`).join("");
@@ -415,10 +417,55 @@ const Restaurant = {
         ${done.length ? done.map((o) => this.orderCard(o, true)).join("") : `<div class="card empty">ماكو طلبات بعد</div>`}`;
     }
   },
+  placeGate() {
+    const m = $("#rmain");
+    if (m.dataset.view === "place") return;
+    m.dataset.view = "place";
+    $("#rtabs").hidden = true;
+    const first = S.profile.lat == null;
+    const pos = first ? null : { lat: S.profile.lat, lng: S.profile.lng };
+    m.innerHTML = `<div class="card place-gate">
+      <div class="pg-icon">📍</div>
+      <h2>${first ? "أهلاً " + esc(S.profile.name || "") + "، حدد موقع محلك" : "تعديل موقع المحل"}</h2>
+      <p class="muted">${first ? "قبل ما تطلب سائق لازم نعرف وين محلك، حتى السائق يطلعله الموقع على الخريطة ويوصلك بدون اتصالات." : "حرّك الدبوس لمكان المحل بالضبط."}</p>
+      <button class="btn primary block big" data-act="gpsPlace">📡 استخدم موقعي الحالي</button>
+      <div class="small muted" id="pgMsg" style="margin:8px 0"></div>
+      <div class="map pg-map" id="pgMap"></div>
+      <p class="small muted" style="margin:6px 0 10px">تكدر تسحب الدبوس 🍽 أو تدوس على الخريطة حتى تعدله.</p>
+      <div class="field"><label>وصف المكان (يساعد السائق)</label><input id="pgAddr" value="${esc(S.profile.address || "")}" placeholder="مثلاً: شارع 40، مقابل جامع..."></div>
+      <button class="btn ok block big" data-act="savePlace" id="pgSave" ${pos ? "" : "disabled"}>✓ ثبّت الموقع</button>
+      ${first ? "" : `<button class="btn ghost block" style="margin-top:8px" data-act="cancelPlace">رجوع</button>`}
+    </div>`;
+    const map = makeMap($("#pgMap"), pos ? 17 : 13);
+    S.maps.place = map; S.placePos = pos;
+    let mk = null;
+    const put = (ll, zoom) => {
+      S.placePos = { lat: ll.lat, lng: ll.lng };
+      if (!mk) { mk = L.marker(ll, { icon: restIcon(), draggable: true }).addTo(map); mk.on("dragend", () => put(mk.getLatLng())); }
+      else mk.setLatLng(ll);
+      if (zoom) map.setView(ll, zoom);
+      $("#pgSave").disabled = false;
+    };
+    this.placePut = put;
+    if (pos) put(pos);
+    map.on("click", (e) => put(e.latlng));
+    setTimeout(() => map.invalidateSize(), 100);
+    if (first) this.gpsPlace(true);
+  },
+  async gpsPlace(silent) {
+    const msg = $("#pgMsg"); if (msg) msg.textContent = "نحدد موقعك...";
+    try {
+      const p = await getPosition();
+      this.placePut(p, 17);
+      if (msg) msg.textContent = "✓ تحدد موقعك. تأكد الدبوس على المحل بالضبط وبعدين ثبّته.";
+    } catch (err) {
+      if (msg) msg.innerHTML = `<span class="bad-t">${esc(errMsg(err))}</span> · إذا رفضت الإذن: افتح إعدادات المتصفح ← الموقع ← اسمح، أو حدده يدوياً على الخريطة.`;
+      if (!silent) toast(errMsg(err), true);
+    }
+  },
   formHtml() {
     const noLoc = S.profile.lat == null;
     return `${Push.banner("restaurant").replace('margin-top:12px', 'margin-bottom:12px')}
-    ${noLoc ? `<div class="alert warn" style="margin-bottom:12px">موقع المطعم غير محدد. حدده حتى نرسل أقرب سائق.<div style="margin-top:8px"><button class="btn sm dark" data-act="setloc">حدد موقعي هسه</button></div></div>` : ""}
     <form class="card" id="orderForm" autocomplete="off">
       <h2>طلب سائق جديد</h2>
       <div class="field"><label>اسم الزبون</label><input name="name" required></div>
@@ -433,7 +480,7 @@ const Restaurant = {
       <div id="sum" class="alert info" hidden></div>
       <button class="btn primary block big" style="margin-top:12px">اطلب سائق</button>
     </form>
-    ${!noLoc ? `<p class="small muted" style="text-align:center">موقع المطعم محفوظ · <a href="#" data-act="setloc">حدّثه</a></p>` : ""}`;
+    ${!noLoc ? `<p class="small muted" style="text-align:center">📍 موقع المحل محفوظ${S.profile.address ? " (" + esc(S.profile.address) + ")" : ""} · <a href="#" data-act="setloc">عدّله</a></p>` : ""}`;
   },
   bindForm() {
     const f = $("#orderForm");
@@ -504,19 +551,32 @@ const Restaurant = {
     const id = Number(b.dataset.id);
     if (b.dataset.act === "setloc") {
       e.preventDefault();
+      S.placeEdit = true; $("#rmain").dataset.view = ""; return this.render();
+    }
+    if (b.dataset.act === "gpsPlace") return this.gpsPlace(false);
+    if (b.dataset.act === "cancelPlace") { S.placeEdit = false; this.closePlace(); return; }
+    if (b.dataset.act === "savePlace") {
+      const p = S.placePos; if (!p) return toast("حدد الموقع أول", true);
+      b.disabled = true;
       try {
-        const p = await getPosition();
-        await rpc("restaurant_set_location", { p_lat: p.lat, p_lng: p.lng });
-        Object.assign(S.profile, p);
-        toast("تم حفظ موقع المطعم");
-        $("#rmain").dataset.view = ""; this.render();
-      } catch (err) { toast(errMsg(err), true); }
+        const address = $("#pgAddr").value.trim();
+        await rpc("restaurant_set_place", { p_lat: p.lat, p_lng: p.lng, p_address: address || null });
+        Object.assign(S.profile, p, address ? { address } : {});
+        S.placeEdit = false;
+        toast("✓ انحفظ موقع المحل، هسه السائق يشوفه");
+        this.closePlace();
+      } catch (err) { toast(errMsg(err), true); b.disabled = false; }
+      return;
     }
     if (b.dataset.act === "cancel") {
       if (!confirm(`تلغي طلب #${id}؟`)) return;
       try { await rpc("cancel_order", { oid: id, reason: "ألغاه المطعم" }); toast("انلغى الطلب"); this.load(); } catch (err) { toast(errMsg(err), true); }
     }
     if (b.dataset.act === "track") this.openTrack(id);
+  },
+  closePlace() {
+    if (S.maps.place) { S.maps.place.remove(); S.maps.place = null; }
+    S.tab = "new"; $("#rmain").dataset.view = ""; this.render();
   },
   openTrack(id) {
     const o = S.orders.find((x) => x.id === id); const d = S.drivers[o?.driver_id];
@@ -632,13 +692,26 @@ const Driver = {
         <div class="stat"><div class="v num">${S.orders.filter((o) => o.status === "delivered" && o.driver_id === p.id && o.delivered_at >= startOfToday()).length}</div><div class="l">توصيلات اليوم</div></div>
       </div>`;
   },
+  placeOf(o) {
+    const r = S.restaurants[o.restaurant_id] || {};
+    const lat = o.pickup_lat ?? r.lat, lng = o.pickup_lng ?? r.lng;
+    if (lat == null) return null;
+    let km = null;
+    if (S.profile.lat != null) {
+      const R = 6371, rad = Math.PI / 180, dLa = (lat - S.profile.lat) * rad, dLo = (lng - S.profile.lng) * rad;
+      const a = Math.sin(dLa / 2) ** 2 + Math.cos(S.profile.lat * rad) * Math.cos(lat * rad) * Math.sin(dLo / 2) ** 2;
+      km = 2 * R * Math.asin(Math.sqrt(a));
+    }
+    return { lat, lng, km, link: `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}` };
+  },
   offerHtml(o) {
     const r = S.restaurants[o.restaurant_id] || {};
+    const pl = this.placeOf(o);
     return `<div class="card offer" style="margin-top:12px">
       <div class="spread"><h2 style="margin:0">طلب جديد #${o.id}</h2><div class="countdown num" data-cd="${o.offer_expires_at}"></div></div>
       <div class="bar" style="margin:8px 0 12px"><i data-bar="${o.offer_expires_at}"></i></div>
       <dl class="kv">
-        <dt>من</dt><dd><b>${esc(r.name || "مطعم")}</b>${r.address ? ` — ${esc(r.address)}` : ""}</dd>
+        <dt>من</dt><dd><b>${esc(r.name || "مطعم")}</b>${r.address ? ` — ${esc(r.address)}` : ""}${pl ? `<br><a class="small" target="_blank" rel="noopener" href="${pl.link}">📍 موقع المطعم على الخريطة</a>${pl.km != null ? ` <span class="small muted">· يبعد عنك ${pl.km < 1 ? Math.round(pl.km * 1000) + " م" : pl.km.toFixed(1) + " كم"}</span>` : ""}` : ""}</dd>
         <dt>إلى</dt><dd><b>${esc(zoneName(o.zone_id))}</b> — ${esc(o.address)}</dd>
       </dl>
       <div class="money">
@@ -654,7 +727,7 @@ const Driver = {
   activeHtml(o) {
     const r = S.restaurants[o.restaurant_id] || {};
     const next = { accepted: ["picked_up", "استلمت الطلب من المطعم"], picked_up: ["on_the_way", "انطلقت للزبون"], on_the_way: ["delivered", "توصّل ✓ استلمت المبلغ"] }[o.status];
-    const mapsLink = r.lat ? `https://www.google.com/maps/dir/?api=1&destination=${r.lat},${r.lng}` : null;
+    const mapsLink = this.placeOf(o)?.link || null;
     return `<div class="card order" style="margin-top:12px">
       <div class="head"><span class="id">#${o.id}</span>${chip(o.status)}</div>
       <dl class="kv">
@@ -672,7 +745,7 @@ const Driver = {
         ${next ? `<button class="btn primary block big" data-act="status" data-st="${next[0]}" data-id="${o.id}">${next[1]}</button>` : ""}
         <div class="row">
           <a class="btn sm" href="tel:${esc(o.customer_phone)}">اتصل بالزبون</a>
-          ${mapsLink && o.status === "accepted" ? `<a class="btn sm" target="_blank" rel="noopener" href="${mapsLink}">طريق المطعم</a>` : ""}
+          ${mapsLink && o.status === "accepted" ? `<a class="btn sm" target="_blank" rel="noopener" href="${mapsLink}">📍 طريق المطعم</a>` : ""}
           ${o.status !== "accepted" ? `<button class="btn sm bad" data-act="refused" data-id="${o.id}">الزبون رفض / ما رد</button>` : ""}
         </div>
       </div></div>`;
