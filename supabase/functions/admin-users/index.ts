@@ -29,13 +29,14 @@ Deno.serve(async (req) => {
     // who is calling?
     const { count: adminCount } = await admin.from("profiles").select("id", { count: "exact", head: true }).eq("role", "admin");
     const bootstrap = (adminCount ?? 0) === 0;
-    let callerIsAdmin = false;
+    let callerIsAdmin = false, callerCanUsers = bootstrap;
     const token = (req.headers.get("Authorization") || "").replace("Bearer ", "");
     if (token) {
       const { data } = await admin.auth.getUser(token);
       if (data?.user) {
-        const { data: prof } = await admin.from("profiles").select("role,active").eq("id", data.user.id).maybeSingle();
+        const { data: prof } = await admin.from("profiles").select("role,active,permissions").eq("id", data.user.id).maybeSingle();
         callerIsAdmin = prof?.role === "admin" && prof?.active;
+        callerCanUsers = callerIsAdmin && (prof.permissions == null || prof.permissions.includes("users"));
       }
     }
     if (!callerIsAdmin && !(bootstrap && action === "create" && body.role === "admin")) {
@@ -45,6 +46,8 @@ Deno.serve(async (req) => {
     if (action === "create") {
       const role = body.role;
       if (!["admin", "restaurant", "driver"].includes(role)) return json({ error: "نوع الحساب غلط" }, 400);
+      if (role === "admin" && !callerCanUsers) return json({ error: "ما عندك صلاحية المستخدمين" }, 403);
+      const permissions = role === "admin" && !bootstrap && Array.isArray(body.permissions) ? body.permissions.map(String) : null;
       const phone = normPhone(body.phone);
       if (phone.length < 10) return json({ error: "رقم الهاتف غير صحيح" }, 400);
       if (!body.name?.trim()) return json({ error: "الاسم مطلوب" }, 400);
@@ -59,7 +62,7 @@ Deno.serve(async (req) => {
       const { error: e2 } = await admin.from("profiles").insert({
         id: u.user!.id, role, name: body.name.trim(), phone,
         address: body.address || null, zone_id: body.zone_id || null,
-        lat: body.lat ?? null, lng: body.lng ?? null, vehicle: body.vehicle || null,
+        lat: body.lat ?? null, lng: body.lng ?? null, vehicle: body.vehicle || null, permissions,
       });
       if (e2) {
         await admin.auth.admin.deleteUser(u.user!.id);
@@ -70,6 +73,8 @@ Deno.serve(async (req) => {
 
     if (action === "reset_password") {
       if (!body.password || body.password.length < 6) return json({ error: "الرمز لازم 6 أحرف أو أكثر" }, 400);
+      const { data: target } = await admin.from("profiles").select("role").eq("id", body.user_id).maybeSingle();
+      if (target?.role === "admin" && !callerCanUsers) return json({ error: "ما عندك صلاحية المستخدمين" }, 403);
       const { error } = await admin.auth.admin.updateUserById(body.user_id, { password: body.password });
       if (error) return json({ error: error.message }, 400);
       return json({ ok: true });

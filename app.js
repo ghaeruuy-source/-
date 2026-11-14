@@ -49,6 +49,8 @@ const STATUS = {
   refused: "مرفوض / ما رد",
   cancelled: "ملغي",
 };
+const PERMS = [["live", "الرئيسية"], ["map", "الخريطة"], ["drivers", "السائقين"], ["restaurants", "المطاعم"], ["orders", "كل الطلبات"], ["vouchers", "السندات"], ["daily", "الحركة اليومية"], ["accounts", "الحسابات"], ["reports", "التقارير"], ["statement", "كشف حساب"], ["zones", "المناطق والأجور"], ["flagged", "أرقام مرفوضة"], ["users", "المستخدمين والصلاحيات"], ["settings", "الإعدادات"]];
+const canTab = (k) => { const p = S.profile?.permissions; return !p || p.includes(k) || k === "live" && !p.length; };
 const VT = { receive: "سند قبض", spend: "سند صرف", pay: "سند دفع" };
 function numToWords(num) {
   num = Math.floor(Math.abs(Number(num) || 0));
@@ -816,11 +818,12 @@ const Admin = {
   },
   render(soft = false) {
     const active = S.orders.filter((o) => ACTIVE.includes(o.status));
-    const tabs = [["live", `الرئيسية${active.length ? `<span class="pill-count">${active.length}</span>` : ""}`], ["map", "🗺 الخريطة"], ["drivers", "السائقين"], ["restaurants", "المطاعم"], ["orders", "كل الطلبات"], ["vouchers", "السندات"], ["daily", "الحركة اليومية"], ["accounts", "الحسابات"], ["reports", "التقارير"], ["zones", "المناطق والأجور"], ["flagged", "أرقام مرفوضة"], ["settings", "الإعدادات"]];
+    const tabs = [["live", `الرئيسية${active.length ? `<span class="pill-count">${active.length}</span>` : ""}`], ["map", "🗺 الخريطة"], ["drivers", "السائقين"], ["restaurants", "المطاعم"], ["orders", "كل الطلبات"], ["vouchers", "السندات"], ["daily", "الحركة اليومية"], ["accounts", "الحسابات"], ["reports", "التقارير"], ["zones", "المناطق والأجور"], ["flagged", "أرقام مرفوضة"], ["statement", "كشف حساب"], ["users", "المستخدمين والصلاحيات"], ["settings", "الإعدادات"]].filter(([k]) => canTab(k));
+    if (!canTab(S.tab)) S.tab = tabs[0]?.[0] || "live";
     $("#atabs").innerHTML = tabs.map(([k, l]) => `<button class="tab ${S.tab === k ? "on" : ""}" data-tab="${k}">${l}</button>`).join("");
     const m = $("#amain");
     // forms shouldn't be wiped by realtime updates
-    if (soft && ["settings", "zones", "flagged", "accounts", "orders", "reports", "vouchers", "daily"].includes(S.tab) && m.dataset.view === S.tab) return;
+    if (soft && ["settings", "zones", "flagged", "accounts", "orders", "reports", "vouchers", "daily", "users", "statement"].includes(S.tab) && m.dataset.view === S.tab) return;
     document.body.classList.toggle("live-mode", S.tab === "map");
     if (S.tab !== "map" && S.maps.admin) { S.maps.admin.remove(); S.maps.admin = null; S.markers = {}; S.fitted = false; }
     m.dataset.view = S.tab;
@@ -837,6 +840,8 @@ const Admin = {
     if (S.tab === "orders") return this.renderOrders();
     if (S.tab === "flagged") return this.renderFlagged();
     if (S.tab === "settings") return this.renderSettings();
+    if (S.tab === "users") return this.renderUsers();
+    if (S.tab === "statement") return this.renderStatement();
   },
   // ----- live -----
   liveNumbers() {
@@ -1009,7 +1014,7 @@ const Admin = {
         <td class="num">${b.delivered_count || 0}</td>
         <td><div class="row" style="flex-wrap:nowrap">
           <button class="btn sm ok" data-act="settle" data-id="${d.id}">تسديد</button>
-          <button class="btn sm" data-act="ledger" data-id="${d.id}">الحساب</button>
+          <button class="btn sm" data-act="${canTab("statement") ? "stmt" : "ledger"}" data-type="driver" data-id="${d.id}">كشف حساب</button>
           <button class="btn sm ghost" data-act="toggleActive" data-id="${d.id}">${d.active ? "إيقاف" : "تفعيل"}</button>
           <button class="btn sm ghost" data-act="resetPw" data-id="${d.id}">رمز جديد</button>
         </div></td></tr>`; }).join("") || `<tr><td colspan="6" class="empty">ماكو سائقين. ضيف أول سائق.</td></tr>`}
@@ -1029,6 +1034,7 @@ const Admin = {
         <td class="small">${r.lat != null ? "✓ محدد" : `<span style="color:var(--warn)">غير محدد</span>`}</td>
         <td class="num">${today.filter((o) => o.restaurant_id === r.id).length}</td>
         <td><div class="row" style="flex-wrap:nowrap">
+          ${canTab("statement") ? `<button class="btn sm" data-act="stmt" data-type="restaurant" data-id="${r.id}">كشف حساب</button>` : ""}
           <button class="btn sm ghost" data-act="toggleActive" data-id="${r.id}">${r.active ? "إيقاف" : "تفعيل"}</button>
           <button class="btn sm ghost" data-act="resetPw" data-id="${r.id}">رمز جديد</button>
         </div></td></tr>`).join("") || `<tr><td colspan="6" class="empty">ماكو مطاعم. ضيف أول مطعم.</td></tr>`}
@@ -1511,6 +1517,8 @@ const Admin = {
         await adminUsers({ action: "reset_password", user_id: id, password: pw }); toast("تغير الرمز. بلّغه بالرمز الجديد");
       }
       if (act === "addUser") return this.addUserModal(b.dataset.role);
+      if (act === "permUser") return this.permModal(id || null);
+      if (act === "stmt") { S.stm = { ...(S.stm || {}), type: b.dataset.type, id }; S.tab = "statement"; return this.render(); }
       if (act === "settle") return this.voucherModal("receive", { party_type: "driver", party_id: id, amount: Math.max(0, Number(S.balances?.[id]?.debt || 0)) || "" });
       if (act === "ledger") return this.ledgerModal(id);
       if (act === "zoneSave") {
@@ -1592,6 +1600,155 @@ const Admin = {
         catch (err) { toast(errMsg(err), true); }
       };
     });
+  },
+  // ----- users & permissions -----
+  renderUsers() {
+    const me = S.profile.id;
+    const admins = S.people.filter((p) => p.role === "admin");
+    const others = S.people.filter((p) => p.role !== "admin");
+    const permsTxt = (p) => !p.permissions ? `<span class="chip st-delivered">مدير كامل</span>` : p.permissions.length ? p.permissions.map((k) => `<span class="chip">${(PERMS.find((x) => x[0] === k) || [k, k])[1]}</span>`).join(" ") : `<span class="chip st-cancelled">بدون صلاحيات</span>`;
+    const ROLE = { admin: "إدارة", driver: "سائق", restaurant: "مطعم" };
+    $("#amain").innerHTML = `
+      <div class="spread"><h2 style="margin:0">مستخدمين الإدارة (${admins.length})</h2><button class="btn primary" data-act="permUser">+ مستخدم جديد</button></div>
+      <p class="small muted">كل مستخدم يشوف بس التبويبات المؤشرة إله. "مدير كامل" يشوف كلشي ويكدر يضيف مستخدمين.</p>
+      <div class="card table-wrap" style="padding:0"><table><thead><tr><th>الاسم</th><th>الرقم</th><th>الحالة</th><th>الصلاحيات</th><th></th></tr></thead><tbody>
+      ${admins.map((a) => `<tr><td><b>${esc(a.name)}</b>${a.id === me ? ` <span class="small muted">(إنت)</span>` : ""}</td><td>${tel(a.phone)}</td>
+        <td>${a.active ? `<span class="chip st-delivered">فعّال</span>` : `<span class="chip st-cancelled">موقوف</span>`}</td>
+        <td style="max-width:420px">${permsTxt(a)}</td>
+        <td>${a.id === me ? "" : `<div class="row" style="flex-wrap:nowrap">
+          <button class="btn sm" data-act="permUser" data-id="${a.id}">الصلاحيات</button>
+          <button class="btn sm ghost" data-act="resetPw" data-id="${a.id}">رمز جديد</button>
+          <button class="btn sm ghost" data-act="toggleActive" data-id="${a.id}">${a.active ? "إيقاف" : "تفعيل"}</button></div>`}</td></tr>`).join("")}
+      </tbody></table></div>
+      <div class="spread" style="margin-top:20px"><h2 style="margin:0">كل الحسابات (${others.length})</h2>
+        <div class="row"><button class="btn sm" data-act="addUser" data-role="driver">+ سائق</button><button class="btn sm" data-act="addUser" data-role="restaurant">+ مطعم</button></div></div>
+      <div class="card table-wrap" style="margin-top:12px;padding:0"><table><thead><tr><th>الاسم</th><th>النوع</th><th>الرقم</th><th>الحالة</th><th></th></tr></thead><tbody>
+      ${others.map((u) => `<tr><td><b>${esc(u.name)}</b></td><td><span class="chip">${ROLE[u.role] || u.role}</span></td><td>${tel(u.phone)}</td>
+        <td>${u.active ? `<span class="chip st-delivered">فعّال</span>` : `<span class="chip st-cancelled">موقوف</span>`}</td>
+        <td><div class="row" style="flex-wrap:nowrap">
+          ${canTab("statement") ? `<button class="btn sm" data-act="stmt" data-type="${u.role}" data-id="${u.id}">كشف حساب</button>` : ""}
+          <button class="btn sm ghost" data-act="resetPw" data-id="${u.id}">رمز جديد</button>
+          <button class="btn sm ghost" data-act="toggleActive" data-id="${u.id}">${u.active ? "إيقاف" : "تفعيل"}</button></div></td></tr>`).join("") || `<tr><td colspan="5" class="empty">ماكو حسابات</td></tr>`}
+      </tbody></table></div>`;
+  },
+  permModal(id) {
+    const u = id ? S.people.find((p) => p.id === id) : null;
+    const full = u ? !u.permissions : false;
+    const has = (k) => !u ? ["live", "orders"].includes(k) : !u.permissions || u.permissions.includes(k);
+    modal(`<h3>${u ? `صلاحيات ${esc(u.name)}` : "مستخدم إدارة جديد"}</h3>
+      <form id="pForm">
+        ${u ? "" : `<div class="field"><label>الاسم</label><input name="name" required></div>
+        <div class="field"><label>رقم الموبايل (يستعمله للدخول)</label><input name="phone" type="tel" inputmode="tel" required></div>
+        <div class="field"><label>الرمز (6 أحرف أو أكثر)</label><input name="password" class="ltr" required minlength="6" value="${Math.random().toString().slice(2, 8)}"></div>`}
+        <label class="perm-full"><input type="checkbox" name="full" ${full ? "checked" : ""}> <b>مدير كامل</b> <span class="small muted">(كل التبويبات + إضافة مستخدمين)</span></label>
+        <div class="perm-grid" id="pGrid">${PERMS.map(([k, l]) => `<label class="perm"><input type="checkbox" name="p" value="${k}" ${has(k) ? "checked" : ""}> ${l}</label>`).join("")}</div>
+        <div class="row" style="flex-wrap:nowrap;margin-top:14px"><button class="btn primary" style="flex:1">${u ? "حفظ" : "إنشاء الحساب"}</button><button type="button" class="btn ghost" data-close>إلغاء</button></div>
+      </form>`, (bg, close) => {
+      const f = $("#pForm", bg);
+      const sync = () => { $("#pGrid", bg).style.opacity = f.full.checked ? 0.4 : 1; f.querySelectorAll("[name=p]").forEach((c) => (c.disabled = f.full.checked)); };
+      f.full.onchange = sync; sync();
+      f.onsubmit = async (e) => {
+        e.preventDefault();
+        const permissions = f.full.checked ? null : [...f.querySelectorAll("[name=p]:checked")].map((c) => c.value);
+        if (permissions && !permissions.length) return toast("اختار صلاحية وحدة على الأقل", true);
+        const btn = f.querySelector("button"); btn.disabled = true;
+        try {
+          if (u) {
+            const { error } = await sb.from("profiles").update({ permissions }).eq("id", u.id);
+            if (error) throw error; close(); toast("انحفظت الصلاحيات");
+          } else {
+            const d = Object.fromEntries(new FormData(f));
+            await adminUsers({ action: "create", role: "admin", name: d.name, phone: d.phone, password: d.password, permissions });
+            close();
+            const link = location.origin + location.pathname;
+            modal(`<h3>تم ✓</h3><p>دز هذي المعلومات لـ ${esc(d.name)}:</p>
+              <div class="card" style="user-select:all;white-space:pre-line">الرابط: ${esc(link)}\nالرقم: ${esc(normPhone(d.phone))}\nالرمز: ${esc(d.password)}</div>
+              <div class="row" style="margin-top:12px"><a class="btn ok" target="_blank" rel="noopener" href="https://wa.me/964${normPhone(d.phone).slice(1)}?text=${encodeURIComponent(`هلا ${d.name}، حسابك بإدارة ${S.settings.app_name} جاهز.\nالرابط: ${link}\nالرقم: ${normPhone(d.phone)}\nالرمز: ${d.password}`)}">إرسال واتساب</a><button class="btn" data-close>سد</button></div>`);
+          }
+          await this.load(); if (S.tab === "users") this.renderUsers();
+        } catch (err) { toast(errMsg(err), true); btn.disabled = false; }
+      };
+    });
+  },
+  // ----- account statement (driver / restaurant) -----
+  async renderStatement() {
+    const m = $("#amain");
+    const today = new Date(Date.now() + 3 * 3600e3).toISOString().slice(0, 10);
+    S.stm ||= {};
+    S.stm.type ||= "driver"; S.stm.from ||= today.slice(0, 8) + "01"; S.stm.to ||= today;
+    const list = S.people.filter((p) => p.role === S.stm.type).sort((a, b) => a.name.localeCompare(b.name, "ar"));
+    if (!list.find((p) => p.id === S.stm.id)) S.stm.id = list[0]?.id || "";
+    const who = list.find((p) => p.id === S.stm.id);
+    m.innerHTML = `
+      <div class="card no-print stm-bar">
+        <div class="seg"><button class="${S.stm.type === "driver" ? "on" : ""}" data-st="driver">🛵 سائق</button><button class="${S.stm.type === "restaurant" ? "on" : ""}" data-st="restaurant">🍽 مطعم</button></div>
+        <select id="sWho" style="flex:1;min-width:180px">${list.map((p) => `<option value="${p.id}" ${p.id === S.stm.id ? "selected" : ""}>${esc(p.name)}</option>`).join("") || `<option value="">ماكو</option>`}</select>
+        <span class="row date-range"><input type="date" id="sFrom" value="${S.stm.from}" style="width:auto"> إلى <input type="date" id="sTo" value="${S.stm.to}" style="width:auto"></span>
+        <button class="btn sm" onclick="window.print()">🖨 طباعة</button>
+      </div>
+      <div id="stmBody"><div class="spinner" style="margin:40px auto"></div></div>`;
+    m.querySelectorAll("[data-st]").forEach((b) => (b.onclick = () => { S.stm.type = b.dataset.st; S.stm.id = ""; this.renderStatement(); }));
+    $("#sWho").onchange = (e) => { S.stm.id = e.target.value; this.renderStatement(); };
+    $("#sFrom").onchange = (e) => { S.stm.from = e.target.value; this.renderStatement(); };
+    $("#sTo").onchange = (e) => { S.stm.to = e.target.value; this.renderStatement(); };
+    const body = $("#stmBody");
+    if (!who) { body.innerHTML = `<div class="empty">ماكو ${S.stm.type === "driver" ? "سواق" : "مطاعم"}</div>`; return; }
+    const from = `${S.stm.from}T00:00:00+03:00`;
+    const toD = new Date(S.stm.to + "T12:00:00Z"); toD.setUTCDate(toD.getUTCDate() + 1);
+    const to = `${toD.toISOString().slice(0, 10)}T00:00:00+03:00`;
+    const n = (v) => (Number(v) ? Number(v).toLocaleString("en-US") : "");
+    const head = `<div class="stm-head"><div><h2 style="margin:0">كشف حساب ${S.stm.type === "driver" ? "سائق" : "مطعم"}: ${esc(who.name)}</h2>
+      <div class="small muted">${esc(who.phone || "")} · من ${S.stm.from} إلى ${S.stm.to}</div></div><div class="print-only small">${esc(S.settings?.app_name || "")}</div></div>`;
+    try {
+      if (S.stm.type === "driver") {
+        const [pre, rows, ords] = await Promise.all([
+          sb.from("ledger").select("amount").eq("driver_id", who.id).lt("created_at", from),
+          sb.from("ledger").select("*").eq("driver_id", who.id).gte("created_at", from).lt("created_at", to).order("created_at").order("id"),
+          sb.from("orders").select("id,status,delivery_fee,commission,order_total").eq("driver_id", who.id).gte("created_at", from).lt("created_at", to),
+        ]);
+        const err = pre.error || rows.error || ords.error; if (err) throw err;
+        const opening = (pre.data || []).reduce((a, l) => a + Number(l.amount), 0);
+        let bal = opening, dr = 0, cr = 0;
+        const rs = (rows.data || []).map((l) => { const a = Number(l.amount); bal += a; if (a > 0) dr += a; else cr -= a; return { ...l, a, bal }; });
+        const del = (ords.data || []).filter((o) => o.status === "delivered");
+        const KIND = { commission: "عمولة", settlement: "تسديد", adjustment: "تعديل" };
+        body.innerHTML = head + `
+          <div class="stats" style="margin-top:12px">
+            <div class="stat"><div class="v">${money(opening)}</div><div class="l">رصيد سابق</div></div>
+            <div class="stat"><div class="v pos">${money(dr)}</div><div class="l">عليه (عمولات وسلف)</div></div>
+            <div class="stat"><div class="v neg">${money(cr)}</div><div class="l">سدّد</div></div>
+            <div class="stat"><div class="v">${money(bal)}</div><div class="l">${bal > 0 ? "الباقي بذمته" : bal < 0 ? "له عدنا" : "الرصيد"}</div></div>
+          </div>
+          <p class="small muted">توصيلات بهذي الفترة: <b>${del.length}</b> طلب · أجور توصيل: <b>${money(del.reduce((a, o) => a + Number(o.delivery_fee || 0), 0))}</b> · عمولة: <b>${money(del.reduce((a, o) => a + Number(o.commission || 0), 0))}</b></p>
+          <div class="card table-wrap" style="padding:0"><table><thead><tr><th>التاريخ</th><th>النوع</th><th>البيان</th><th>عليه</th><th>سدّد</th><th>الرصيد</th></tr></thead><tbody>
+            <tr><td></td><td></td><td><b>رصيد سابق</b></td><td></td><td></td><td class="num"><b>${n(opening) || 0}</b></td></tr>
+            ${rs.map((l) => `<tr><td class="num">${dateTime(l.created_at)}</td><td><span class="chip">${KIND[l.kind] || l.kind}</span></td><td>${esc(l.note || "")}</td>
+              <td class="num pos">${l.a > 0 ? n(l.a) : ""}</td><td class="num neg">${l.a < 0 ? n(-l.a) : ""}</td><td class="num"><b>${n(l.bal) || 0}</b></td></tr>`).join("") || `<tr><td colspan="6" class="empty">ماكو حركات بهذي الفترة</td></tr>`}
+            <tr class="tot"><td colspan="3"><b>المجموع</b></td><td class="num pos"><b>${n(dr) || 0}</b></td><td class="num neg"><b>${n(cr) || 0}</b></td><td class="num"><b>${n(bal) || 0}</b></td></tr>
+          </tbody></table></div>
+          <div class="print-only sig"><div>توقيع السائق</div><div>توقيع المحاسب</div></div>`;
+      } else {
+        const { data, error } = await sb.from("orders").select("*").eq("restaurant_id", who.id).gte("created_at", from).lt("created_at", to).order("id");
+        if (error) throw error;
+        const os = data || [], del = os.filter((o) => o.status === "delivered");
+        const sum = (a, k) => a.reduce((x, o) => x + Number(o[k] || 0), 0);
+        const zn = (id) => S.zones.find((z) => z.id === id)?.name || "";
+        body.innerHTML = head + `
+          <div class="stats five" style="margin-top:12px">
+            <div class="stat"><div class="v num">${os.length}</div><div class="l">كل الطلبات</div></div>
+            <div class="stat"><div class="v num">${del.length}</div><div class="l">توصّلت</div></div>
+            <div class="stat"><div class="v num">${os.filter((o) => ["refused", "cancelled"].includes(o.status)).length}</div><div class="l">مرفوضة / ملغية</div></div>
+            <div class="stat"><div class="v">${money(sum(del, "order_total"))}</div><div class="l">قيمة الطلبات الواصلة</div></div>
+            <div class="stat"><div class="v">${money(sum(del, "delivery_fee"))}</div><div class="l">أجور التوصيل</div></div>
+          </div>
+          <div class="card table-wrap" style="margin-top:12px;padding:0"><table><thead><tr><th>#</th><th>التاريخ</th><th>الزبون</th><th>المنطقة</th><th>السائق</th><th>قيمة الطلب</th><th>التوصيل</th><th>الحالة</th></tr></thead><tbody>
+            ${os.map((o) => `<tr class="${["refused", "cancelled"].includes(o.status) ? "voided" : ""}"><td class="num">${o.id}</td><td class="num">${dateTime(o.created_at)}</td><td>${esc(o.customer_name || "")}<div class="small muted num">${esc(o.customer_phone || "")}</div></td>
+              <td>${esc(zn(o.zone_id))}</td><td>${esc(S.drivers[o.driver_id]?.name || "")}</td><td class="num">${n(o.order_total)}</td><td class="num">${n(o.delivery_fee)}</td><td>${chip(o.status)}</td></tr>`).join("") || `<tr><td colspan="8" class="empty">ماكو طلبات بهذي الفترة</td></tr>`}
+            <tr class="tot"><td colspan="5"><b>مجموع الواصلة (${del.length})</b></td><td class="num"><b>${n(sum(del, "order_total")) || 0}</b></td><td class="num"><b>${n(sum(del, "delivery_fee")) || 0}</b></td><td></td></tr>
+          </tbody></table></div>
+          <div class="print-only sig"><div>توقيع المطعم</div><div>توقيع المحاسب</div></div>`;
+      }
+    } catch (err) { body.innerHTML = `<div class="alert bad">${esc(errMsg(err))}</div>`; }
   },
   async ledgerModal(id) {
     const { data } = await sb.from("ledger").select("*").eq("driver_id", id).order("id", { ascending: false }).limit(200);
