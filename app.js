@@ -888,11 +888,18 @@ const Driver = {
 // =====================================================================
 const Admin = {
   async start() {
-    S.tab = "live";
+    S.tab = (location.hash.slice(1) || "live").split("?")[0];
     app().innerHTML = `${topbar("الإدارة")}<nav class="tabs" id="atabs"></nav><main class="wrap" id="amain"></main>`;
-    $("#atabs").onclick = (e) => { const t = e.target.closest("[data-tab]"); if (t) { S.tab = t.dataset.tab; this.render(); } };
+    // tabs are links: Ctrl/⌘/middle click or "open in new tab" opens a second window on that tab
+    $("#atabs").onclick = (e) => {
+      if (e.target.closest("[data-newwin]")) { e.preventDefault(); window.open(location.pathname + "#" + S.tab, "_blank"); return; }
+      const t = e.target.closest("[data-tab]"); if (!t) return;
+      if (e.ctrlKey || e.metaKey || e.shiftKey || e.button === 1) return;
+      e.preventDefault(); S.tab = t.dataset.tab; this.render();
+    };
+    window.addEventListener("hashchange", () => { const h = location.hash.slice(1); if (h && h !== S.tab && canTab(h)) { S.tab = h; this.render(); } });
     $("#amain").addEventListener("click", (e) => this.onClick(e));
-    $("#amain").addEventListener("click", (e) => { const g = e.target.closest("[data-tab-go]"); if (g) { S.tab = g.dataset.tabGo; this.render(); } });
+    $("#amain").addEventListener("click", (e) => { const g = e.target.closest("[data-tab-go]"); if (g) { e.preventDefault(); S.tab = g.dataset.tabGo; this.render(); } });
     window.addEventListener("resize", () => { if (S.tab === "map") this.fitLive(); });
     $("#amain").addEventListener("click", (e) => {
       if (e.target.closest("[data-act], a")) return;
@@ -959,7 +966,9 @@ const Admin = {
     const active = S.orders.filter((o) => ACTIVE.includes(o.status));
     const tabs = [["live", `الرئيسية${active.length ? `<span class="pill-count">${active.length}</span>` : ""}`], ["map", "🗺 الخريطة"], ["drivers", "السائقين"], ["restaurants", "المطاعم"], ["orders", "كل الطلبات"], ["vouchers", "السندات"], ["boxes", "💰 الصناديق"], ["daily", "الحركة اليومية"], ["accounts", "الحسابات"], ["reports", "التقارير"], ["zones", "المناطق والأجور"], ["flagged", "أرقام مرفوضة"], ["statement", "كشف حساب"], ["users", "المستخدمين والصلاحيات"], ["settings", "الإعدادات"]].filter(([k]) => canTab(k));
     if (!canTab(S.tab)) S.tab = tabs[0]?.[0] || "live";
-    $("#atabs").innerHTML = tabs.map(([k, l]) => `<button class="tab ${S.tab === k ? "on" : ""}" data-tab="${k}">${l}</button>`).join("");
+    $("#atabs").innerHTML = tabs.map(([k, l]) => `<a class="tab ${S.tab === k ? "on" : ""}" href="#${k}" data-tab="${k}">${l}</a>`).join("")
+      + `<button class="tab newwin" data-newwin title="افتح هذي الصفحة بنافذة ثانية (أو Ctrl + كبسة على أي تبويب)">⧉ نافذة جديدة</button>`;
+    if (location.hash.slice(1) !== S.tab) history.replaceState(null, "", "#" + S.tab);
     const m = $("#amain");
     // forms shouldn't be wiped by realtime updates
     if (soft && ["settings", "zones", "flagged", "accounts", "orders", "reports", "vouchers", "daily", "users", "statement", "boxes"].includes(S.tab) && m.dataset.view === S.tab) return;
