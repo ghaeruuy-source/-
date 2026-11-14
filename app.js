@@ -889,7 +889,17 @@ const Driver = {
 const Admin = {
   async start() {
     S.tab = (location.hash.slice(1) || "live").split("?")[0];
-    app().innerHTML = `${topbar("الإدارة")}<nav class="tabs" id="atabs"></nav><main class="wrap" id="amain"></main>`;
+    app().innerHTML = `${topbar("الإدارة")}<div class="ptabs" id="ptabs"></div><nav class="tabs" id="atabs"></nav><div id="apages"></div>`;
+    S.pages = new Map(); S.pageKey = null;
+    try { S.openPages = JSON.parse(localStorage.getItem("jayek-pages") || "[]").filter((k) => typeof k === "string"); } catch (_) { S.openPages = []; }
+    $("#ptabs").onclick = (e) => {
+      const x = e.target.closest("[data-pclose]");
+      if (x) { e.preventDefault(); e.stopPropagation(); return this.closePage(x.dataset.pclose); }
+      const t = e.target.closest("[data-ptab]"); if (!t) return;
+      if (e.ctrlKey || e.metaKey || e.shiftKey || e.button === 1) return;
+      e.preventDefault(); S.tab = t.dataset.ptab; this.render();
+    };
+    $("#ptabs").addEventListener("auxclick", (e) => { const t = e.target.closest("[data-ptab]"); if (t && e.button === 1 && e.altKey) this.closePage(t.dataset.ptab); });
     // tabs are links: Ctrl/⌘/middle click or "open in new tab" opens a second window on that tab
     $("#atabs").onclick = (e) => {
       if (e.target.closest("[data-newwin]")) { e.preventDefault(); window.open(location.pathname + "#" + S.tab, "_blank"); return; }
@@ -898,10 +908,10 @@ const Admin = {
       e.preventDefault(); S.tab = t.dataset.tab; this.render();
     };
     window.addEventListener("hashchange", () => { const h = location.hash.slice(1); if (h && h !== S.tab && canTab(h)) { S.tab = h; this.render(); } });
-    $("#amain").addEventListener("click", (e) => this.onClick(e));
-    $("#amain").addEventListener("click", (e) => { const g = e.target.closest("[data-tab-go]"); if (g) { e.preventDefault(); S.tab = g.dataset.tabGo; this.render(); } });
+    $("#apages").addEventListener("click", (e) => this.onClick(e));
+    $("#apages").addEventListener("click", (e) => { const g = e.target.closest("[data-tab-go]"); if (g) { e.preventDefault(); S.tab = g.dataset.tabGo; this.render(); } });
     window.addEventListener("resize", () => { if (S.tab === "map") this.fitLive(); });
-    $("#amain").addEventListener("click", (e) => {
+    $("#apages").addEventListener("click", (e) => {
       if (e.target.closest("[data-act], a")) return;
       const row = e.target.closest("[data-focus]"); if (!row) return;
       S.focusOrder = Number(row.dataset.focus); S.tab = "map"; this.render();
@@ -962,6 +972,28 @@ const Admin = {
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "settings" }, (p) => { S.settings = p.new; applyBranding(); })
       .subscribe();
   },
+  // in-app page tabs: each opened page keeps its own content (forms, filters) while you switch between them
+  showPage(k, tabs) {
+    if (!S.openPages.includes(k)) S.openPages.push(k);
+    S.openPages = S.openPages.filter((x) => tabs.some(([t]) => t === x));
+    try { localStorage.setItem("jayek-pages", JSON.stringify(S.openPages)); } catch (_) {}
+    const label = (t) => (tabs.find(([x]) => x === t)?.[1] || t).replace(/<span[^>]*>.*?<\/span>/g, "");
+    $("#ptabs").innerHTML = S.openPages.map((t) => `<a class="ptab ${t === k ? "on" : ""}" href="#${t}" data-ptab="${t}"><span>${label(t)}</span>${S.openPages.length > 1 ? `<b data-pclose="${t}" title="سد">×</b>` : ""}</a>`).join("");
+    document.documentElement.style.setProperty("--ptabs-h", $("#ptabs").offsetHeight + "px");
+    if (S.pageKey === k && $("#amain")) return "same";
+    const cur = $("#amain");
+    if (cur) { cur.removeAttribute("id"); cur.remove(); }
+    let el = S.pages.get(k), state = "kept";
+    if (!el || ["live", "map"].includes(k)) { el = document.createElement("main"); el.className = "wrap"; S.pages.set(k, el); state = "new"; }
+    el.id = "amain"; $("#apages").appendChild(el); S.pageKey = k;
+    return state;
+  },
+  closePage(k) {
+    const i = S.openPages.indexOf(k); if (i < 0 || S.openPages.length < 2) return;
+    S.openPages.splice(i, 1); S.pages.delete(k);
+    if (S.tab === k) { S.tab = S.openPages[Math.min(i, S.openPages.length - 1)]; }
+    this.render();
+  },
   render(soft = false) {
     const active = S.orders.filter((o) => ACTIVE.includes(o.status));
     const tabs = [["live", `الرئيسية${active.length ? `<span class="pill-count">${active.length}</span>` : ""}`], ["map", "🗺 الخريطة"], ["drivers", "السائقين"], ["restaurants", "المطاعم"], ["orders", "كل الطلبات"], ["vouchers", "السندات"], ["boxes", "💰 الصناديق"], ["daily", "الحركة اليومية"], ["accounts", "الحسابات"], ["reports", "التقارير"], ["zones", "المناطق والأجور"], ["flagged", "أرقام مرفوضة"], ["statement", "كشف حساب"], ["users", "المستخدمين والصلاحيات"], ["settings", "الإعدادات"]].filter(([k]) => canTab(k));
@@ -969,6 +1001,8 @@ const Admin = {
     $("#atabs").innerHTML = tabs.map(([k, l]) => `<a class="tab ${S.tab === k ? "on" : ""}" href="#${k}" data-tab="${k}">${l}</a>`).join("")
       + `<button class="tab newwin" data-newwin title="افتح هذي الصفحة بنافذة ثانية (أو Ctrl + كبسة على أي تبويب)">⧉ نافذة جديدة</button>`;
     if (location.hash.slice(1) !== S.tab) history.replaceState(null, "", "#" + S.tab);
+    const sw = this.showPage(S.tab, tabs);
+    if (sw === "kept") soft = true;
     const m = $("#amain");
     // forms shouldn't be wiped by realtime updates
     if (soft && ["settings", "zones", "flagged", "accounts", "orders", "reports", "vouchers", "daily", "users", "statement", "boxes"].includes(S.tab) && m.dataset.view === S.tab) return;
