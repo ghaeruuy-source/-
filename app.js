@@ -824,6 +824,7 @@ const Admin = {
     document.body.classList.toggle("live-mode", S.tab === "map");
     if (S.tab !== "map" && S.maps.admin) { S.maps.admin.remove(); S.maps.admin = null; S.markers = {}; S.fitted = false; }
     m.dataset.view = S.tab;
+    m.classList.toggle("wide", S.tab === "live");
     if (S.tab === "live") return this.renderLive();
     if (S.tab === "map") return this.renderMap();
     if (S.tab === "accounts") return this.renderAccounts();
@@ -849,17 +850,19 @@ const Admin = {
   renderLive() {
     const n = this.liveNumbers();
     $("#amain").innerHTML = `
-      <div class="stats five">
-        <div class="stat"><div class="v num">${n.active.length}</div><div class="l">طلبات نشطة</div></div>
-        <div class="stat"><div class="v num">${n.online.length}</div><div class="l">سائق متصل هسه</div></div>
-        <div class="stat"><div class="v num">${n.delivered.length}</div><div class="l">توصّل اليوم</div></div>
-        <div class="stat"><div class="v">${money(n.commission)}</div><div class="l">عمولة اليوم</div></div>
-        <div class="stat"><div class="v">${money(n.totalDebt)}</div><div class="l">ديون على السائقين</div></div>
-      </div>
-      <div class="dash">
-        <section class="card pad0"><div class="panel-h spread"><span>الطلبات النشطة</span><button class="btn sm ghost" data-tab-go="map">🗺 افتح الخريطة</button></div>
-          <div id="liveOrders">${n.active.length ? n.active.map((o) => this.orderRow(o)).join("") : `<div class="empty">ماكو طلبات نشطة هسه</div>`}</div></section>
-        <section class="card pad0"><div class="panel-h">آخر الأحداث</div><div id="feed" class="feed-scroll"></div></section>
+      <div class="ldash">
+        <aside class="lside">
+          <div class="stats mini">
+            <div class="stat"><div class="v num">${n.active.length}</div><div class="l">طلبات نشطة</div></div>
+            <div class="stat"><div class="v num">${n.online.length}</div><div class="l">سائق متصل</div></div>
+            <div class="stat"><div class="v num">${n.delivered.length}</div><div class="l">توصّل اليوم</div></div>
+            <div class="stat"><div class="v">${money(n.commission)}</div><div class="l">عمولة اليوم</div></div>
+            <div class="stat wide"><div class="v">${money(n.totalDebt)}</div><div class="l">ديون على السائقين</div></div>
+          </div>
+          <section class="card pad0"><div class="panel-h spread"><span>الطلبات النشطة</span><button class="btn sm ghost" data-tab-go="map">🗺 الخريطة</button></div>
+            <div id="liveOrders">${n.active.length ? n.active.map((o) => this.orderRow(o)).join("") : `<div class="empty">ماكو طلبات نشطة هسه</div>`}</div></section>
+        </aside>
+        <section class="card pad0 lfeed"><div class="panel-h">🔔 آخر الأحداث</div><div id="feed" class="feed-scroll"></div></section>
       </div>`;
     this.renderFeed();
   },

@@ -247,3 +247,21 @@ tr.tot td { border-top: 2px solid var(--ink); background: var(--surface-2); }
 .date-range { margin-inline-start: auto; }
 .date-range input { width: auto; min-width: 0; max-width: 150px; }
 @media (max-width: 600px) { .date-range { margin-inline-start: 0; width: 100%; flex-wrap: nowrap; } .date-range input { flex: 1; max-width: none; } }
+
+/* live home: feed takes most of the screen, details narrow on the right */
+#amain.wide { max-width: none; }
+.ldash { display: grid; gap: 16px; grid-template-columns: 1fr; align-items: start; }
+@media (min-width: 900px) {
+  .ldash { grid-template-columns: minmax(300px, 30%) 1fr; }
+  .lfeed { position: sticky; top: 12px; }
+  .lfeed .feed-scroll { max-height: calc(100vh - 220px); min-height: 60vh; }
+  .lfeed .feed-item { font-size: 17px; padding: 14px 20px; gap: 14px; }
+  .lfeed .feed-item .fi { font-size: 24px; }
+  .lfeed .panel-h { font-size: 19px; padding: 14px 20px 10px; }
+}
+.lside { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.stats.mini { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.stats.mini .stat { padding: 10px 12px; }
+.stats.mini .stat .v { font-size: 18px; }
+.stats.mini .stat .l { font-size: 12px; }
+.stats.mini .stat.wide { grid-column: 1 / -1; }
