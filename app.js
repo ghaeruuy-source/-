@@ -199,6 +199,10 @@ function makeMap(el, zoom = 13) {
 }
 const driverIcon = (d, busy) => L.divIcon({ className: "", html: `<div class="drv-pin ${!d.online ? "off" : busy ? "busy" : ""}">${esc((d.name || "س").trim()[0])}</div>`, iconSize: [30, 30], iconAnchor: [15, 15] });
 const restIcon = () => L.divIcon({ className: "", html: `<div class="rest-pin">🍽</div>`, iconSize: [26, 26], iconAnchor: [13, 13] });
+const bigDriverIcon = (d, on, bo) => L.divIcon({ className: "", iconSize: [56, 70], iconAnchor: [28, 28], popupAnchor: [0, -26],
+  html: `<div class="bpin ${!on ? "off" : bo ? "busy" : "free"}"><div class="bpin-c">🛵${bo ? `<span class="bpin-badge">#${bo.id}</span>` : ""}</div><div class="bpin-l">${esc(d.name)}</div></div>` });
+const bigRestIcon = (r) => L.divIcon({ className: "", iconSize: [56, 64], iconAnchor: [28, 22], popupAnchor: [0, -20],
+  html: `<div class="bpin rest"><div class="bpin-c">🍽</div><div class="bpin-l">${esc(r.name)}</div></div>` });
 
 // ---------- boot ----------
 async function boot() {
@@ -715,6 +719,15 @@ const Admin = {
     app().innerHTML = `${topbar("الإدارة")}<nav class="tabs" id="atabs"></nav><main class="wrap" id="amain"></main>`;
     $("#atabs").onclick = (e) => { const t = e.target.closest("[data-tab]"); if (t) { S.tab = t.dataset.tab; this.render(); } };
     $("#amain").addEventListener("click", (e) => this.onClick(e));
+    window.addEventListener("resize", () => { if (S.tab === "live") this.fitLive(); });
+    $("#amain").addEventListener("click", (e) => {
+      if (e.target.closest("[data-act], a")) return;
+      const row = e.target.closest("[data-focus]"); if (!row || !S.maps.admin) return;
+      const o = S.orders.find((x) => x.id === Number(row.dataset.focus));
+      const d = S.drivers[o?.driver_id || o?.offered_driver_id], r = S.restaurants[o?.restaurant_id];
+      const target = d?.lat != null ? [d.lat, d.lng] : r?.lat != null ? [r.lat, r.lng] : null;
+      if (target) { S.maps.admin.setView(target, 16); (S.markers["d" + d?.id] || S.markers["r" + r?.id])?.openPopup(); }
+    });
     await this.load();
     this.subscribe();
     every(20000, () => this.load());
@@ -735,6 +748,7 @@ const Admin = {
     S.balances = Object.fromEntries((b.data || []).map((x) => [x.driver_id, x]));
     S.zones = z.data || [];
     S.people.forEach((x) => (x.role === "driver" ? (S.drivers[x.id] = x) : x.role === "restaurant" ? (S.restaurants[x.id] = x) : 0));
+    if (!S.feed) this.buildFeed();
     this.render(true);
   },
   subscribe() {
@@ -742,7 +756,11 @@ const Admin = {
       .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, (p) => {
         const o = p.new; if (!o?.id) return;
         const i = S.orders.findIndex((x) => x.id === o.id);
+        const prev = i >= 0 ? S.orders[i] : null;
         if (i >= 0) S.orders[i] = o; else S.orders.unshift(o);
+        if (!prev) this.pushFeed(o, "created");
+        else if (prev.status !== o.status && o.status !== "searching") this.pushFeed(o, o.status);
+        else if (o.status === "offered" && prev.offered_driver_id !== o.offered_driver_id) this.pushFeed(o, "offered");
         this.render(true);
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "profiles" }, (p) => {
@@ -761,7 +779,8 @@ const Admin = {
     const m = $("#amain");
     // forms shouldn't be wiped by realtime updates
     if (soft && ["settings", "zones", "flagged"].includes(S.tab) && m.dataset.view === S.tab) return;
-    if (S.tab !== "live" && S.maps.admin) { S.maps.admin.remove(); S.maps.admin = null; S.markers = {}; }
+    document.body.classList.toggle("live-mode", S.tab === "live");
+    if (S.tab !== "live" && S.maps.admin) { S.maps.admin.remove(); S.maps.admin = null; S.markers = {}; S.fitted = false; }
     m.dataset.view = S.tab;
     if (S.tab === "live") return this.renderLive();
     if (S.tab === "drivers") return this.renderDrivers();
@@ -775,54 +794,140 @@ const Admin = {
   renderLive() {
     const m = $("#amain");
     if (!S.maps.admin) {
-      m.innerHTML = `<div class="stats" id="liveStats"></div>
-        <div class="grid2" style="margin-top:16px">
-          <div><div class="map tall" id="adminMap"></div><p class="small muted">🟠 فاضي · 🔵 عنده طلب · ⚪ مطفي</p></div>
-          <div id="liveOrders"></div>
+      m.innerHTML = `<div class="live">
+          <div class="map-full" id="adminMap"></div>
+          <div class="float-stats" id="liveStats"></div>
+          <aside class="side">
+            <section class="panel feed-panel"><div class="panel-h">آخر الأحداث</div><div id="feed"></div></section>
+            <section class="panel"><div class="panel-h">الطلبات النشطة</div><div id="liveOrders"></div></section>
+          </aside>
         </div>`;
-      S.maps.admin = makeMap($("#adminMap"), 13); S.markers = {};
+      S.maps.admin = makeMap($("#adminMap"), 14); S.markers = {};
+      S.maps.admin.zoomControl.setPosition("bottomleft");
+      this.fitLive();
     }
     const active = S.orders.filter((o) => ACTIVE.includes(o.status));
     const today = S.orders.filter((o) => o.created_at >= startOfToday());
     const delivered = today.filter((o) => o.status === "delivered");
-    const online = Object.values(S.drivers).filter((d) => d.online && d.active);
+    const stale = Number(S.settings?.location_stale_min || 10) * 60000;
+    const online = Object.values(S.drivers).filter((d) => d.online && d.active && Date.now() - new Date(d.location_at) < stale);
     const totalDebt = Object.values(S.balances || {}).reduce((a, b) => a + Number(b.debt || 0), 0);
     $("#liveStats").innerHTML = `
-      <div class="stat"><div class="v num">${active.length}</div><div class="l">طلبات نشطة</div></div>
-      <div class="stat"><div class="v num">${online.length}</div><div class="l">سائقين متصلين</div></div>
-      <div class="stat"><div class="v num">${delivered.length}</div><div class="l">توصّل اليوم</div></div>
-      <div class="stat"><div class="v">${money(delivered.reduce((a, o) => a + Number(o.commission), 0))}</div><div class="l">عمولة اليوم · الديون الكلية ${Number(totalDebt).toLocaleString("en-US")}</div></div>`;
-    $("#liveOrders").innerHTML = `<div class="section-title" style="margin-top:0">الطلبات النشطة</div>` +
-      (active.length ? active.map((o) => this.orderRow(o)).join("") : `<div class="card empty">ماكو طلبات نشطة</div>`);
+      <div class="fstat"><b class="num">${active.length}</b><span>طلبات نشطة</span></div>
+      <div class="fstat"><b class="num">${online.length}</b><span>سائق متصل</span></div>
+      <div class="fstat"><b class="num">${delivered.length}</b><span>توصّل اليوم</span></div>
+      <div class="fstat"><b>${money(delivered.reduce((a, o) => a + Number(o.commission), 0))}</b><span>عمولة اليوم</span></div>
+      <div class="fstat"><b>${money(totalDebt)}</b><span>الديون الكلية</span></div>
+      <div class="fstat legend"><i class="lg free"></i>فاضي <i class="lg busy"></i>عنده طلب <i class="lg off"></i>مطفي</div>`;
+    $("#liveOrders").innerHTML = active.length ? active.map((o) => this.orderRow(o)).join("") : `<div class="empty">ماكو طلبات نشطة</div>`;
+    this.renderFeed();
     this.updateMap();
+  },
+  fitLive() {
+    const t = $("#atabs").getBoundingClientRect().bottom;
+    document.documentElement.style.setProperty("--live-top", `${Math.round(t)}px`);
+    setTimeout(() => S.maps.admin?.invalidateSize(), 50);
+  },
+  // activity feed: built from order timestamps, then extended live
+  buildFeed() {
+    const ev = [];
+    S.orders.filter((o) => o.created_at >= startOfToday()).forEach((o) => {
+      ev.push(this.feedItem(o, "created", o.created_at));
+      if (o.accepted_at) ev.push(this.feedItem(o, "accepted", o.accepted_at));
+      if (o.picked_up_at) ev.push(this.feedItem(o, "picked_up", o.picked_up_at));
+      if (o.delivered_at) ev.push(this.feedItem(o, "delivered", o.delivered_at));
+      if (["refused", "cancelled"].includes(o.status) && o.closed_at) ev.push(this.feedItem(o, o.status, o.closed_at));
+    });
+    S.feed = ev.sort((a, b) => new Date(b.t) - new Date(a.t)).slice(0, 60);
+  },
+  feedItem(o, kind, t) {
+    const r = S.restaurants[o.restaurant_id]?.name || "مطعم";
+    const d = S.drivers[o.driver_id || o.offered_driver_id]?.name || "السائق";
+    const z = zoneName(o.zone_id);
+    const map = {
+      created: ["🍽", `<b>${esc(r)}</b> طلب سائق · طلب #${o.id} إلى ${esc(z)}`],
+      offered: ["📨", `انرسل طلب #${o.id} إلى <b>${esc(d)}</b>`],
+      accepted: ["🛵", `<b>${esc(d)}</b> وافق على طلب #${o.id} من ${esc(r)}`],
+      picked_up: ["📦", `<b>${esc(d)}</b> استلم طلب #${o.id} من ${esc(r)}`],
+      on_the_way: ["➡️", `<b>${esc(d)}</b> بالطريق للزبون · طلب #${o.id}`],
+      delivered: ["✅", `<b>${esc(d)}</b> وصّل طلب #${o.id}`],
+      refused: ["⛔", `الزبون رفض طلب #${o.id} (${esc(o.customer_name)})`],
+      cancelled: ["✖️", `انلغى طلب #${o.id} من ${esc(r)}`],
+    };
+    const [icon, html] = map[kind] || ["•", `طلب #${o.id}: ${STATUS[kind] || kind}`];
+    return { icon, html, t, kind, id: o.id };
+  },
+  pushFeed(o, kind) {
+    const it = this.feedItem(o, kind, new Date().toISOString());
+    (S.feed = S.feed || []).unshift(it); S.feed = S.feed.slice(0, 60); it.fresh = true;
+    if (kind !== "offered") { toast(it.html.replace(/<[^>]+>/g, "")); if (["created", "accepted", "refused"].includes(kind)) beep(); }
+  },
+  renderFeed() {
+    const el = $("#feed"); if (!el) return;
+    el.innerHTML = (S.feed || []).length ? S.feed.map((f) => `<div class="feed-item ${f.fresh ? "fresh" : ""} k-${f.kind}"><span class="fi">${f.icon}</span><div>${f.html}<div class="small muted">${time(f.t)} · ${ago(f.t)}</div></div></div>`).join("") : `<div class="empty">ماكو أحداث اليوم بعد</div>`;
+    (S.feed || []).forEach((f) => (f.fresh = false));
   },
   orderRow(o) {
     const r = S.restaurants[o.restaurant_id], d = S.drivers[o.driver_id || o.offered_driver_id];
-    return `<div class="card order">
-      <div class="head"><span class="id">#${o.id} · ${esc(r?.name || "")}</span>${chip(o.status)}</div>
+    const waiting = ["searching", "offered"].includes(o.status);
+    return `<div class="lorder" data-focus="${o.id}">
+      <div class="spread"><b>#${o.id} · ${esc(r?.name || "")}</b>${chip(o.status)}</div>
       <div class="small">${esc(o.customer_name)} · ${tel(o.customer_phone)} · ${esc(zoneName(o.zone_id))}</div>
-      <div class="small muted">${money(o.order_total)} + ${money(o.delivery_fee)} · ${time(o.created_at)}
-        ${d ? ` · السائق: ${esc(d.name)}` : ""}${o.status === "offered" ? ` · <span data-exp="${o.offer_expires_at}"></span>` : ""}</div>
-      ${ACTIVE.includes(o.status) ? `<div class="row" style="margin-top:8px"><button class="btn sm ghost" data-act="cancelOrder" data-id="${o.id}">إلغاء</button>
-        ${o.driver_id ? `<button class="btn sm ghost" data-act="forceDeliver" data-id="${o.id}">تأشير توصّل</button>` : ""}</div>` : ""}
+      <div class="small muted">${money(o.order_total)} + ${money(o.delivery_fee)} · ${time(o.created_at)}${d ? ` · ${o.status === "offered" ? "معروض على" : "السائق"}: <b>${esc(d.name)}</b>` : ""}${o.status === "offered" ? ` · <span data-exp="${o.offer_expires_at}"></span>` : ""}</div>
+      <div class="row" style="margin-top:6px">
+        ${waiting ? `<button class="btn sm dark" data-act="assign" data-id="${o.id}">إرسال لسائق</button>` : ""}
+        ${o.driver_id ? `<button class="btn sm ghost" data-act="forceDeliver" data-id="${o.id}">تأشير توصّل</button>` : ""}
+        <button class="btn sm ghost" data-act="cancelOrder" data-id="${o.id}">إلغاء</button>
+      </div>
     </div>`;
+  },
+  assignModal(oid) {
+    const o = S.orders.find((x) => x.id === oid); if (!o) return;
+    const stale = Number(S.settings?.location_stale_min || 10) * 60000;
+    const busy = new Set(S.orders.filter((x) => ["accepted", "picked_up", "on_the_way"].includes(x.status)).map((x) => x.driver_id));
+    const km = (d) => (o.pickup_lat == null || d.lat == null ? null : Math.hypot((d.lat - o.pickup_lat) * 111, (d.lng - o.pickup_lng) * 93.5));
+    const list = Object.values(S.drivers).filter((d) => d.active).map((d) => ({ d, km: km(d), fresh: d.online && Date.now() - new Date(d.location_at) < stale }))
+      .sort((a, b) => (b.fresh - a.fresh) || ((a.km ?? 999) - (b.km ?? 999)));
+    modal(`<h3>إرسال طلب #${o.id} لسائق</h3><p class="small muted" style="margin-top:-8px">يوصله عرض ويكدر يقبل أو يرفض خلال ${S.settings?.offer_timeout_sec || 30} ثانية.</p>
+      ${list.map(({ d, km, fresh }) => `<div class="ledger-item" style="align-items:center"><div><b>${esc(d.name)}</b>
+        <div class="small muted">${fresh ? "متصل" : "غير متصل"}${busy.has(d.id) ? " · عنده طلب" : ""}${km != null ? ` · ${km.toFixed(1)} كم` : ""}</div></div>
+        <button class="btn sm ${fresh && !busy.has(d.id) ? "primary" : "ghost"}" data-pick="${d.id}">إرسال</button></div>`).join("") || `<div class="empty">ماكو سائقين</div>`}
+      <button class="btn block" data-close style="margin-top:12px">سد</button>`, (bg, close) => {
+      bg.addEventListener("click", async (e) => {
+        const b = e.target.closest("[data-pick]"); if (!b) return;
+        b.disabled = true;
+        try { await rpc("admin_offer", { oid, p_driver: b.dataset.pick }); toast("انرسل العرض للسائق"); close(); this.load(); }
+        catch (err) { toast(errMsg(err), true); b.disabled = false; }
+      });
+    });
   },
   updateMap() {
     const map = S.maps.admin; if (!map) return;
-    const busy = new Set(S.orders.filter((o) => ["accepted", "picked_up", "on_the_way"].includes(o.status)).map((o) => o.driver_id));
+    const busyOrder = {};
+    S.orders.filter((o) => ["accepted", "picked_up", "on_the_way"].includes(o.status)).forEach((o) => (busyOrder[o.driver_id] = o));
     const stale = Number(S.settings?.location_stale_min || 10) * 60000;
     Object.values(S.drivers).forEach((d) => {
-      if (d.lat == null || !d.active) return;
       const k = "d" + d.id;
-      const shown = { ...d, online: d.online && Date.now() - new Date(d.location_at) < stale };
-      const pop = `<b>${esc(d.name)}</b><br>${esc(d.phone)}<br>${d.online ? "متصل" : "مطفي"} · ${ago(d.location_at)}<br>دين: ${Number(S.balances?.[d.id]?.debt || 0).toLocaleString("en-US")}`;
-      if (S.markers[k]) { S.markers[k].setLatLng([d.lat, d.lng]).setIcon(driverIcon(shown, busy.has(d.id))).setPopupContent(pop); }
-      else S.markers[k] = L.marker([d.lat, d.lng], { icon: driverIcon(shown, busy.has(d.id)) }).bindPopup(pop).addTo(map);
+      if (d.lat == null || !d.active) { if (S.markers[k]) { S.markers[k].remove(); delete S.markers[k]; } return; }
+      const on = d.online && Date.now() - new Date(d.location_at) < stale;
+      const bo = busyOrder[d.id];
+      const icon = bigDriverIcon(d, on, bo);
+      const pop = `<b>${esc(d.name)}</b> · ${tel(d.phone)}<br>${on ? "متصل" : "غير متصل"} · آخر موقع ${ago(d.location_at)}${bo ? `<br>طلب #${bo.id}: ${STATUS[bo.status]}<br>${esc(S.restaurants[bo.restaurant_id]?.name || "")} ← ${esc(zoneName(bo.zone_id))}` : ""}<br>الدين: ${money(S.balances?.[d.id]?.debt || 0)}`;
+      if (S.markers[k]) S.markers[k].setLatLng([d.lat, d.lng]).setIcon(icon).setPopupContent(pop).setZIndexOffset(bo ? 1000 : on ? 500 : 0);
+      else S.markers[k] = L.marker([d.lat, d.lng], { icon, zIndexOffset: bo ? 1000 : on ? 500 : 0 }).bindPopup(pop).addTo(map);
     });
     Object.values(S.restaurants).forEach((r) => {
       if (r.lat == null || S.markers["r" + r.id]) return;
-      S.markers["r" + r.id] = L.marker([r.lat, r.lng], { icon: restIcon() }).bindPopup(`<b>${esc(r.name)}</b><br>${esc(r.phone)}`).addTo(map);
+      S.markers["r" + r.id] = L.marker([r.lat, r.lng], { icon: bigRestIcon(r) }).bindPopup(`<b>${esc(r.name)}</b><br>${tel(r.phone)}`).addTo(map);
     });
+    if (!S.fitted) {
+      const pts = Object.values(S.markers).map((mk) => mk.getLatLng());
+      if (pts.length) {
+        const mob = innerWidth <= 760;
+        map.fitBounds(L.latLngBounds(pts), { maxZoom: 15, paddingTopLeft: [40, mob ? 110 : 90], paddingBottomRight: mob ? [40, Math.round(innerHeight * 0.46)] : [420, 60] });
+        S.fitted = true;
+      }
+    }
   },
   // ----- drivers -----
   renderDrivers() {
@@ -973,6 +1078,7 @@ const Admin = {
     const id = b.dataset.id, act = b.dataset.act;
     const person = S.people?.find((p) => p.id === id);
     try {
+      if (act === "assign") return this.assignModal(Number(id));
       if (act === "cancelOrder") { if (!confirm(`إلغاء طلب #${id}؟`)) return; await rpc("cancel_order", { oid: Number(id), reason: "ألغته الإدارة" }); toast("انلغى"); }
       if (act === "forceDeliver") { if (!confirm(`تأشير طلب #${id} كـ توصّل؟ (تنحسب العمولة على السائق)`)) return; await rpc("driver_update_status", { oid: Number(id), p_status: "delivered" }); toast("تم"); }
       if (act === "toggleActive") {

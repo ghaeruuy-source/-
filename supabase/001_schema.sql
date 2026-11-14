@@ -175,7 +175,7 @@ begin
            and x.status in ('accepted','picked_up','on_the_way')) < s.max_active_per_driver
       and not exists (select 1 from orders x where x.offered_driver_id = p.id and x.status = 'offered' and x.id <> oid)
       and not exists (select 1 from order_offers f where f.order_id = oid and f.driver_id = p.id
-                      and f.result in ('declined','pending'))
+                      and (f.result = 'pending' or (f.result = 'declined' and f.created_at > now() - interval '2 minutes')))
       and (o.offered_driver_id is null or p.id <> o.offered_driver_id)
     order by km asc
     limit 1;
