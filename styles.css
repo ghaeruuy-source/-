@@ -314,3 +314,19 @@ tr.tot td { border-top: 2px solid var(--ink); background: var(--surface-2); }
 .vpicked .stm-opt { cursor: default; } .vpicked .stm-opt:hover { background: transparent; }
 .vamount { display: flex; gap: 10px; margin-top: 12px; }
 .big-amt { font-size: 22px !important; font-weight: 700; height: 54px; }
+
+/* expense category chips */
+.cat-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip-btn { border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 999px; padding: 7px 14px; font-weight: 600; font-size: 14px; cursor: pointer; }
+.chip-btn.on { background: var(--bad); border-color: var(--bad); color: #fff; }
+.chip-btn.add { border-style: dashed; color: var(--ink-2); }
+.cat-add { display: flex; gap: 6px; margin-top: 8px; align-items: center; }
+.cat-add input { flex: 1; }
+/* cash boxes */
+.box-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; margin-top: 8px; }
+.box-card { display: flex; flex-direction: column; gap: 6px; }
+.box-card.main { border: 2px solid var(--ink); }
+.box-card.total { background: var(--surface-2); justify-content: center; }
+.box-name { font-size: 17px; }
+.box-bal { font-size: 30px; font-weight: 700; }
+.box-today { display: flex; gap: 14px; font-size: 14px; color: var(--ink-2); }

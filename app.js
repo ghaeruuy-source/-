@@ -49,7 +49,7 @@ const STATUS = {
   refused: "مرفوض / ما رد",
   cancelled: "ملغي",
 };
-const PERMS = [["live", "الرئيسية"], ["map", "الخريطة"], ["drivers", "السائقين"], ["restaurants", "المطاعم"], ["orders", "كل الطلبات"], ["vouchers", "السندات"], ["daily", "الحركة اليومية"], ["accounts", "الحسابات"], ["reports", "التقارير"], ["statement", "كشف حساب"], ["zones", "المناطق والأجور"], ["flagged", "أرقام مرفوضة"], ["users", "المستخدمين والصلاحيات"], ["settings", "الإعدادات"]];
+const PERMS = [["live", "الرئيسية"], ["map", "الخريطة"], ["drivers", "السائقين"], ["restaurants", "المطاعم"], ["orders", "كل الطلبات"], ["vouchers", "السندات"], ["daily", "الحركة اليومية"], ["boxes", "الصناديق"], ["accounts", "الحسابات"], ["reports", "التقارير"], ["statement", "كشف حساب"], ["zones", "المناطق والأجور"], ["flagged", "أرقام مرفوضة"], ["users", "المستخدمين والصلاحيات"], ["settings", "الإعدادات"]];
 const canTab = (k) => { const p = S.profile?.permissions; return !p || p.includes(k) || k === "live" && !p.length; };
 const VT = { receive: "سند قبض", spend: "سند صرف", pay: "سند دفع" };
 function numToWords(num) {
@@ -825,12 +825,12 @@ const Admin = {
   },
   render(soft = false) {
     const active = S.orders.filter((o) => ACTIVE.includes(o.status));
-    const tabs = [["live", `الرئيسية${active.length ? `<span class="pill-count">${active.length}</span>` : ""}`], ["map", "🗺 الخريطة"], ["drivers", "السائقين"], ["restaurants", "المطاعم"], ["orders", "كل الطلبات"], ["vouchers", "السندات"], ["daily", "الحركة اليومية"], ["accounts", "الحسابات"], ["reports", "التقارير"], ["zones", "المناطق والأجور"], ["flagged", "أرقام مرفوضة"], ["statement", "كشف حساب"], ["users", "المستخدمين والصلاحيات"], ["settings", "الإعدادات"]].filter(([k]) => canTab(k));
+    const tabs = [["live", `الرئيسية${active.length ? `<span class="pill-count">${active.length}</span>` : ""}`], ["map", "🗺 الخريطة"], ["drivers", "السائقين"], ["restaurants", "المطاعم"], ["orders", "كل الطلبات"], ["vouchers", "السندات"], ["boxes", "💰 الصناديق"], ["daily", "الحركة اليومية"], ["accounts", "الحسابات"], ["reports", "التقارير"], ["zones", "المناطق والأجور"], ["flagged", "أرقام مرفوضة"], ["statement", "كشف حساب"], ["users", "المستخدمين والصلاحيات"], ["settings", "الإعدادات"]].filter(([k]) => canTab(k));
     if (!canTab(S.tab)) S.tab = tabs[0]?.[0] || "live";
     $("#atabs").innerHTML = tabs.map(([k, l]) => `<button class="tab ${S.tab === k ? "on" : ""}" data-tab="${k}">${l}</button>`).join("");
     const m = $("#amain");
     // forms shouldn't be wiped by realtime updates
-    if (soft && ["settings", "zones", "flagged", "accounts", "orders", "reports", "vouchers", "daily", "users", "statement"].includes(S.tab) && m.dataset.view === S.tab) return;
+    if (soft && ["settings", "zones", "flagged", "accounts", "orders", "reports", "vouchers", "daily", "users", "statement", "boxes"].includes(S.tab) && m.dataset.view === S.tab) return;
     document.body.classList.toggle("live-mode", S.tab === "map");
     if (S.tab !== "map" && S.maps.admin) { S.maps.admin.remove(); S.maps.admin = null; S.markers = {}; S.lines = {}; S.fitted = false; }
     m.dataset.view = S.tab;
@@ -841,6 +841,7 @@ const Admin = {
     if (S.tab === "reports") return this.renderReports();
     if (S.tab === "vouchers") return this.renderVouchers();
     if (S.tab === "daily") return this.renderDaily();
+    if (S.tab === "boxes") return this.renderBoxes();
     if (S.tab === "drivers") return this.renderDrivers();
     if (S.tab === "restaurants") return this.renderRestaurants();
     if (S.tab === "zones") return this.renderZones();
@@ -1360,6 +1361,8 @@ const Admin = {
   },
   async voucherModal(type, pre = {}) {
     if (!S.cats) await this.loadVoucherRefs();
+    { const { data } = await sb.from("cash_boxes").select("*").eq("active", true).order("is_default", { ascending: false }).order("id"); S.boxes = data || []; }
+    const defBox = pre.box_id || S.boxes.find((b) => b.is_default)?.id || S.boxes[0]?.id || "";
     const drivers = S.people.filter((p) => p.role === "driver");
     const today = new Date().toISOString().slice(0, 10);
     const parties = type === "receive" ? [["driver", "سائق (تسديد دين)"], ["partner", "شريك (رأس مال)"], ["other", "جهة أخرى (إيراد)"]]
@@ -1373,7 +1376,11 @@ const Admin = {
         <label>${type === "receive" ? "استلمنا من" : type === "spend" ? "صرفنا إلى" : "دفعنا إلى"}</label>
         <div class="seg seg-wide" id="ptSeg">${parties.map(([k, l]) => `<button type="button" data-pt="${k}" class="${k === pt ? "on" : ""}">${l}</button>`).join("")}</div>
         <div id="pSel" style="margin-top:10px"></div>
-        ${type === "spend" ? `<div class="field"><label>التبويب</label><select name="category" required>${S.cats.filter((c) => c.active || c.name === pre.category).map((c) => `<option ${c.name === (pre.category || "مصاريف عامة") ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select></div>` : ""}
+        ${type === "spend" ? `<div class="field" style="margin-top:12px"><label>نوع المصروف</label><input type="hidden" name="category" value="${esc(pre.category || "مصاريف عامة")}">
+          <div class="cat-chips" id="catChips"></div>
+          <div class="cat-add" id="catAdd" hidden><input id="catNew" placeholder="اسم المصروف الجديد (مثلاً: غرامات)"><button type="button" class="btn sm dark" id="catSave">إضافة</button><button type="button" class="btn sm ghost" id="catCancel">✕</button></div></div>` : ""}
+        ${S.boxes.length > 1 ? `<div class="field"><label>${type === "receive" ? "ينحط بـ" : "ينطلع من"}</label><input type="hidden" name="box_id" value="${defBox}">
+          <div class="seg seg-wide" id="boxSeg">${S.boxes.map((b) => `<button type="button" data-box="${b.id}" class="${String(b.id) === String(defBox) ? "on" : ""}">💰 ${esc(b.name)}</button>`).join("")}</div></div>` : `<input type="hidden" name="box_id" value="${defBox}">`}
         <div class="vamount">
           <div class="field" style="flex:1.4"><label>المبلغ (د.ع)</label><input name="amount" inputmode="numeric" class="ltr big-amt" required value="${esc(pre.amount ?? "")}" placeholder="0"></div>
           <div class="field" style="flex:1"><label>التاريخ</label><input type="date" name="date" value="${today}" required></div></div>
@@ -1422,6 +1429,33 @@ const Admin = {
         };
         setTimeout(() => inp.focus(), 50);
       };
+      const boxSeg = $("#boxSeg", bg);
+      if (boxSeg) boxSeg.onclick = (e) => { const b = e.target.closest("[data-box]"); if (!b) return; f.box_id.value = b.dataset.box; boxSeg.querySelectorAll("[data-box]").forEach((x) => x.classList.toggle("on", x === b)); };
+      if (type === "spend") {
+        const chips = $("#catChips", bg), add = $("#catAdd", bg), inpC = $("#catNew", bg);
+        const drawCats = () => {
+          chips.innerHTML = S.cats.filter((c) => c.active || c.name === f.category.value).map((c) => `<button type="button" class="chip-btn ${c.name === f.category.value ? "on" : ""}" data-cat="${esc(c.name)}">${esc(c.name)}</button>`).join("")
+            + `<button type="button" class="chip-btn add" id="catPlus">+ مصروف جديد</button>`;
+        };
+        drawCats();
+        chips.onclick = (e) => {
+          const b = e.target.closest("[data-cat]"); if (b) { f.category.value = b.dataset.cat; drawCats(); return; }
+          if (e.target.closest("#catPlus")) { add.hidden = false; inpC.focus(); }
+        };
+        const saveCat = async () => {
+          const name = inpC.value.trim(); if (!name) return;
+          const ex = S.cats.find((c) => c.name === name);
+          if (!ex) {
+            const { data, error } = await sb.from("expense_categories").insert({ name }).select().single();
+            if (error) return toast(errMsg(error), true);
+            S.cats.push(data);
+          }
+          f.category.value = name; inpC.value = ""; add.hidden = true; drawCats(); toast(`انضاف "${name}"`);
+        };
+        $("#catSave", bg).onclick = saveCat;
+        inpC.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); saveCat(); } };
+        $("#catCancel", bg).onclick = () => { add.hidden = true; inpC.value = ""; };
+      }
       $("#ptSeg", bg).onclick = (e) => { const b = e.target.closest("[data-pt]"); if (!b) return; f.party_type.value = b.dataset.pt; f.party_id.value = ""; drawParty(); };
       function words() { $("#amtWords", bg).textContent = toNum(f.amount.value) ? `كتابةً: ${numToWords(toNum(f.amount.value))}` : ""; }
       f.amount.oninput = words; drawParty(); words();
@@ -1430,8 +1464,8 @@ const Admin = {
         if (f.party_type.value !== "other" && !f.party_id.value) return toast("اختار الاسم من القائمة", true);
         btn.disabled = true;
         try {
-          const v = await rpc("create_voucher", {
-            p_type: type, p_amount: toNum(f.amount.value), p_date: f.date.value, p_category: f.category?.value || null,
+          const v = await rpc("create_voucher_box", {
+            p_box: f.box_id.value ? Number(f.box_id.value) : null, p_type: type, p_amount: toNum(f.amount.value), p_date: f.date.value, p_category: f.category?.value || null,
             p_party_type: f.party_type.value, p_party_id: f.party_id.value || null, p_party_name: f.party_name?.value || null,
             p_note: f.note.value || null, p_salary_month: pre.salary_month || null,
           });
@@ -1439,7 +1473,7 @@ const Admin = {
           modal(`<h3>✓ ${VT[type]} رقم ${v.number}</h3><p>${money(v.amount)} · ${esc(v.party_name || "")}</p>
             <div class="row"><button class="btn dark" id="pv">🖨 طباعة السند</button><button class="btn" data-close>تمام</button></div>`, (bg2, close2) => { $("#pv", bg2).onclick = () => { this.printVoucher(v.id, v); close2(); }; });
           await this.load();
-          if (S.tab === "vouchers") this.renderVouchers(); else if (S.tab === "accounts") this.renderAccounts(); else if (S.tab === "daily") this.renderDaily();
+          if (S.tab === "vouchers") this.renderVouchers(); else if (S.tab === "accounts") this.renderAccounts(); else if (S.tab === "daily") this.renderDaily(); else if (S.tab === "boxes") this.renderBoxes();
         } catch (err) { toast(errMsg(err), true); btn.disabled = false; }
       };
     });
@@ -1471,6 +1505,77 @@ const Admin = {
     w.document.close();
   },
   // ----- daily movement (الحركة اليومية) -----
+  // ----- cash boxes -----
+  async renderBoxes() {
+    const m = $("#amain");
+    if (m.dataset.view !== "boxes" || !m.querySelector("#boxCards")) m.innerHTML = `<div class="spinner" style="margin:40px auto"></div>`;
+    const [sum, cl, tr] = await Promise.all([
+      rpc0("box_summary"),
+      sb.from("box_closings").select("*").order("closed_at", { ascending: false }).limit(30),
+      sb.from("box_transfers").select("*").is("closing_id", null).order("created_at", { ascending: false }).limit(20),
+    ]);
+    if (sum.error) { m.innerHTML = `<div class="alert bad">${esc(sum.error.message)}</div>`; return; }
+    const boxes = sum.data || []; S.boxes = boxes;
+    const bn = (id) => boxes.find((b) => b.id === id)?.name || "—";
+    const total = boxes.reduce((a, b) => a + Number(b.balance), 0);
+    m.innerHTML = `
+      <div class="spread"><h2 style="margin:0">الصناديق</h2>
+        <div class="row"><button class="btn sm" data-bx="transfer">⇄ تحويل بين الصناديق</button><button class="btn sm ghost" data-bx="new">+ صندوق جديد</button></div></div>
+      <p class="small muted">كل السندات تنزل بالصندوق اللي تختاره (الافتراضي: ${esc(boxes.find((b) => b.is_default)?.name || "—")}). كل ليلة الساعة 11:59 الصندوق اليومي يتسكر ورصيده يروح للقاصة تلقائياً، وتكدر تسكره بيدك بأي وقت.</p>
+      <div class="box-cards" id="boxCards">${boxes.map((b) => `
+        <div class="card box-card ${b.close_to ? "" : "main"}">
+          <div class="spread"><b class="box-name">💰 ${esc(b.name)}</b>${b.is_default ? `<span class="chip st-delivered">الافتراضي</span>` : !b.close_to ? `<span class="chip">الرئيسي</span>` : ""}</div>
+          <div class="box-bal">${money(b.balance)}</div>
+          <div class="box-today"><span>اليوم داخل <b class="neg">${money(b.today_in)}</b></span><span>طالع <b class="pos">${money(b.today_out)}</b></span></div>
+          ${b.close_to ? `<div class="small muted">يتسكر إلى: ${esc(bn(b.close_to))} · آخر تسكير: ${b.last_closed ? dateTime(b.last_closed) : "ما تسكر بعد"}</div>
+            <button class="btn block ${Number(b.balance) ? "primary" : ""}" data-bx="close" data-id="${b.id}" style="margin-top:10px">🔒 تسكير الصندوق الآن</button>` : `<div class="small muted">تتجمع بيه أرصدة الصناديق بعد التسكير</div>`}
+        </div>`).join("")}
+        <div class="card box-card total"><b>المجموع بكل الصناديق</b><div class="box-bal">${money(total)}</div></div>
+      </div>
+      <div class="section-title">سجل التسكير</div>
+      <div class="card table-wrap" style="padding:0"><table><thead><tr><th>الوقت</th><th>الصندوق</th><th>رصيد البداية</th><th>داخل</th><th>طالع</th><th>رصيد التسكير</th><th>راح إلى</th><th></th></tr></thead><tbody>
+        ${(cl.data || []).map((c) => `<tr><td class="num">${dateTime(c.closed_at)}</td><td>${esc(bn(c.box_id))}</td><td class="num">${money(c.opening)}</td><td class="num neg">${money(c.total_in)}</td><td class="num pos">${money(c.total_out)}</td><td><b>${money(c.closing)}</b></td><td>${esc(bn(c.moved_to))}</td><td>${c.auto ? `<span class="chip">تلقائي</span>` : `<span class="chip st-accepted">يدوي</span>`}</td></tr>`).join("") || `<tr><td colspan="8" class="empty">ماكو تسكير بعد</td></tr>`}
+      </tbody></table></div>
+      ${(tr.data || []).length ? `<div class="section-title">التحويلات اليدوية</div>
+      <div class="card table-wrap" style="padding:0"><table><thead><tr><th>الوقت</th><th>من</th><th>إلى</th><th>المبلغ</th><th>ملاحظة</th></tr></thead><tbody>
+        ${tr.data.map((t) => `<tr><td class="num">${dateTime(t.created_at)}</td><td>${esc(bn(t.from_box))}</td><td>${esc(bn(t.to_box))}</td><td><b>${money(t.amount)}</b></td><td>${esc(t.note || "")}</td></tr>`).join("")}
+      </tbody></table></div>` : ""}`;
+    m.querySelectorAll("[data-bx]").forEach((b) => (b.onclick = () => this.boxAction(b.dataset.bx, Number(b.dataset.id), boxes)));
+  },
+  boxAction(act, id, boxes) {
+    const opts = (sel) => boxes.map((b) => `<option value="${b.id}" ${b.id === sel ? "selected" : ""}>${esc(b.name)} (${Number(b.balance).toLocaleString("en-US")})</option>`).join("");
+    if (act === "close") {
+      const b = boxes.find((x) => x.id === id);
+      modal(`<h3>🔒 تسكير ${esc(b.name)}</h3><p>رصيده هسه <b>${money(b.balance)}</b> وراح ينتقل كله إلى <b>${esc(boxes.find((x) => x.id === b.close_to)?.name || "")}</b>، والصندوق يبدي من صفر.</p>
+        <div class="field"><label>ملاحظة (اختياري)</label><input id="cNote"></div>
+        <div class="row" style="flex-wrap:nowrap"><button class="btn primary" style="flex:1" id="cGo">تسكير</button><button class="btn ghost" data-close>إلغاء</button></div>`, (bg, close) => {
+        $("#cGo", bg).onclick = async (e) => { e.target.disabled = true; try { await rpc("close_box", { p_box: id, p_note: $("#cNote", bg).value || null }); close(); toast("تسكر الصندوق"); this.renderBoxes(); } catch (err) { toast(errMsg(err), true); e.target.disabled = false; } };
+      });
+    }
+    if (act === "transfer") {
+      const main = boxes.find((b) => !b.close_to)?.id, def = boxes.find((b) => b.is_default)?.id;
+      modal(`<h3>⇄ تحويل بين الصناديق</h3><form id="tForm">
+        <div class="row" style="flex-wrap:nowrap"><div class="field" style="flex:1"><label>من</label><select name="from">${opts(main)}</select></div><div class="field" style="flex:1"><label>إلى</label><select name="to">${opts(def)}</select></div></div>
+        <div class="field"><label>المبلغ (د.ع)</label><input name="amount" inputmode="numeric" class="ltr big-amt" required></div>
+        <div class="field"><label>ملاحظة</label><input name="note" placeholder="مثلاً: فكة للصندوق اليومي"></div>
+        <div class="row" style="flex-wrap:nowrap"><button class="btn primary" style="flex:1">تحويل</button><button type="button" class="btn ghost" data-close>إلغاء</button></div></form>`, (bg, close) => {
+        $("#tForm", bg).onsubmit = async (e) => { e.preventDefault(); const f = e.target; const btn = f.querySelector("button"); btn.disabled = true;
+          try { await rpc("transfer_box", { p_from: Number(f.from.value), p_to: Number(f.to.value), p_amount: toNum(f.amount.value), p_note: f.note.value || null }); close(); toast("تم التحويل"); this.renderBoxes(); } catch (err) { toast(errMsg(err), true); btn.disabled = false; } };
+      });
+    }
+    if (act === "new") {
+      const main = boxes.find((b) => !b.close_to)?.id;
+      modal(`<h3>صندوق جديد</h3><form id="nbForm">
+        <div class="field"><label>اسم الصندوق</label><input name="name" required placeholder="مثلاً: صندوق المساء"></div>
+        <div class="field"><label>بنهاية اليوم يتسكر إلى</label><select name="close_to"><option value="">ما يتسكر (صندوق رئيسي)</option>${opts(main)}</select></div>
+        <div class="row" style="flex-wrap:nowrap"><button class="btn primary" style="flex:1">إضافة</button><button type="button" class="btn ghost" data-close>إلغاء</button></div></form>`, (bg, close) => {
+        $("#nbForm", bg).onsubmit = async (e) => { e.preventDefault(); const f = e.target;
+          const { error } = await sb.from("cash_boxes").insert({ name: f.name.value.trim(), close_to: f.close_to.value ? Number(f.close_to.value) : null });
+          if (error) return toast(error.message.includes("duplicate") ? "هذا الاسم موجود" : errMsg(error), true);
+          close(); toast("انضاف الصندوق"); this.renderBoxes(); };
+      });
+    }
+  },
   async renderDaily() {
     const m = $("#amain");
     S.day ||= new Date(Date.now() + 3 * 3600e3).toISOString().slice(0, 10); // Baghdad date
