@@ -892,6 +892,17 @@ const Admin = {
         const i = S.people.findIndex((y) => y.id === x.id);
         if (i >= 0) S.people[i] = x; else S.people.push(x);
         if (x.role === "driver") { S.drivers[x.id] = x; this.updateMap(); if (S.tab === "drivers") this.render(); }
+        if (x.role === "restaurant") {
+          const old = S.restaurants[x.id];
+          S.restaurants[x.id] = x;
+          if (x.lat != null && (old?.lat !== x.lat || old?.lng !== x.lng)) {
+            const mk = S.markers["r" + x.id];
+            if (mk) mk.setLatLng([x.lat, x.lng]);
+            toast(`📍 ${x.name} ${old?.lat == null ? "حدد موقعه" : "عدّل موقعه"}`);
+            this.updateMap();
+          }
+          if (S.tab === "restaurants") this.render();
+        }
       })
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "ledger" }, () => this.load())
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "settings" }, (p) => { S.settings = p.new; applyBranding(); })
@@ -1154,7 +1165,7 @@ const Admin = {
         <td><b>${esc(r.name)}</b>${!r.active ? ` <span class="chip st-cancelled">موقوف</span>` : ""}</td>
         <td>${tel(r.phone)}</td>
         <td class="small">${esc(r.address || "—")}${r.zone_id ? ` · ${esc(zoneName(r.zone_id))}` : ""}</td>
-        <td class="small">${r.lat != null ? "✓ محدد" : `<span style="color:var(--warn)">غير محدد</span>`}</td>
+        <td class="small">${r.lat != null ? `<button class="btn sm" data-act="restLoc" data-id="${r.id}">📍 شوف الموقع</button>` : `<span style="color:var(--warn)">⏳ بانتظار يحدده</span>`}</td>
         <td class="num">${today.filter((o) => o.restaurant_id === r.id).length}</td>
         <td><div class="row" style="flex-wrap:nowrap">
           ${canTab("statement") ? `<button class="btn sm" data-act="stmt" data-type="restaurant" data-id="${r.id}">كشف حساب</button>` : ""}
@@ -1163,7 +1174,7 @@ const Admin = {
           <button class="btn sm ghost danger" data-act="removeAcc" data-id="${r.id}">حذف</button>
         </div></td></tr>`).join("") || `<tr><td colspan="6" class="empty">ماكو مطاعم. ضيف أول مطعم.</td></tr>`}
       </tbody></table></div>${this.removedList("restaurant")}
-      <p class="small muted">موقع المطعم يتحدد من موبايل المطعم نفسه أول مرة يطلب سائق (أو من زر "حدد موقعي").</p>`;
+      <p class="small muted">صاحب المطعم يحدد موقعه من موبايله أول ما يسجل دخول، وأول ما يثبّته يطلع هنا وعلى الخريطة.</p>`;
   },
   // ----- zones -----
   renderZones() {
@@ -1853,6 +1864,18 @@ const Admin = {
       if (act === "restoreAcc") { if (!confirm(`إرجاع ${person?.name}؟ يرجع حسابه فعّال ويكدر يدخل.`)) return; await rpc("restore_account", { p_id: id }); toast("رجع الحساب"); await this.load(); return this.render(); }
       if (act === "permUser") return this.permModal(id || null);
       if (act === "stmClear") { S.stm.id = ""; return this.renderStatement(); }
+      if (act === "restLoc") {
+        const r = S.restaurants[id] || S.people.find((x) => x.id === id); if (!r?.lat) return;
+        const g = `https://www.google.com/maps?q=${r.lat},${r.lng}`;
+        return modal(`<h3>📍 ${esc(r.name)}</h3>${r.address ? `<p class="small muted" style="margin-top:-6px">${esc(r.address)}</p>` : ""}
+          <div class="map" id="restLocMap" style="height:320px;border-radius:12px"></div>
+          <div class="row" style="margin-top:10px"><a class="btn primary" target="_blank" rel="noopener" href="${g}">افتح بـ Google Maps</a><button class="btn ghost" data-close>سد</button></div>`, (bg) => {
+          const m = makeMap($("#restLocMap", bg), 17); m.setView([r.lat, r.lng], 17);
+          L.marker([r.lat, r.lng], { icon: restIcon() }).addTo(m);
+          setTimeout(() => m.invalidateSize(), 100);
+          new MutationObserver((_, ob) => { if (!document.body.contains(bg)) { m.remove(); ob.disconnect(); } }).observe(document.body, { childList: true });
+        });
+      }
       if (act === "stmt") { S.stm = { ...(S.stm || {}), type: b.dataset.type, id }; S.tab = "statement"; return this.render(); }
       if (act === "settle") return this.voucherModal("receive", { party_type: "driver", party_id: id, amount: Math.max(0, Number(S.balances?.[id]?.debt || 0)) || "" });
       if (act === "ledger") return this.ledgerModal(id);
