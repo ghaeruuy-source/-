@@ -52,6 +52,12 @@ Deno.serve(async (req) => {
       if (phone.length < 10) return json({ error: "رقم الهاتف غير صحيح" }, 400);
       if (!body.name?.trim()) return json({ error: "الاسم مطلوب" }, 400);
       if (!body.password || body.password.length < 6) return json({ error: "الرمز لازم 6 أحرف أو أكثر" }, 400);
+      // a removed (archived) account holding this phone gives it up
+      const { data: old } = await admin.from("profiles").select("id").eq("phone", phone).not("removed_at", "is", null).maybeSingle();
+      if (old) {
+        await admin.auth.admin.updateUserById(old.id, { email: `removed-${old.id}@jayek.app` });
+        await admin.from("profiles").update({ phone: `${phone}-محذوف` }).eq("id", old.id);
+      }
       const { data: u, error } = await admin.auth.admin.createUser({
         email: `${phone}@jayek.app`,
         password: body.password,
