@@ -1157,68 +1157,68 @@ const Admin = {
     const cashOut = Number(T.expenses || 0) + Number(T.salaries || 0) + Number(T.withdrawals || 0) + Number(T.other_payments || 0) + Number(T.driver_payouts || 0);
     const partners = T.partners || [];
     const shareSum = partners.filter((p) => p.active).reduce((a, p) => a + Number(p.share), 0);
+    const catRows = Object.entries(byCat).sort((x, y) => y[1] - x[1]);
+    const catMax = Math.max(1, ...catRows.map((r) => r[1]));
     m.innerHTML = `
-      <h2 style="margin:0 0 12px">الحسابات</h2>
-      <div class="dash" style="margin-top:0">
-        <section class="card">
-          <h3>💰 القاصة (النقد اللي عندكم هسه)</h3>
-          <div class="acc-line"><span>استلمتوا من السائقين (عمولات)</span><b class="neg">+${money(T.received)}</b></div>
-          <div class="acc-line"><span>رأس مال دخّله الشركاء</span><b class="neg">+${money(T.capital)}</b></div>
-          <div class="acc-line"><span>إيرادات أخرى (سندات قبض)</span><b class="neg">+${money(T.other_income)}</b></div>
-          <div class="acc-line"><span>مصاريف</span><b class="pos">−${money(T.expenses)}</b></div>
-          <div class="acc-line"><span>رواتب</span><b class="pos">−${money(T.salaries)}</b></div>
-          <div class="acc-line"><span>سحوبات الشركاء</span><b class="pos">−${money(T.withdrawals)}</b></div>
-          <div class="acc-line"><span>دفعات أخرى (سندات دفع)</span><b class="pos">−${money(Number(T.other_payments || 0) + Number(T.driver_payouts || 0))}</b></div>
-          <div class="acc-line total"><span>الرصيد بالقاصة</span><b>${money(cashIn - cashOut)}</b></div>
-          <p class="small muted" style="margin:8px 0 0">وبرّه القاصة: ديون على السائقين ما استلمتوها بعد <b>${money(T.debt)}</b></p>
-        </section>
-        <section class="card">
-          <h3>🤝 الشركاء</h3>
-          ${partners.length && Math.abs(shareSum - 100) > 0.01 ? `<div class="alert warn small" style="margin-bottom:8px">مجموع النسب ${shareSum}% لازم يكون 100%</div>` : ""}
-          <p class="small muted" style="margin:-6px 0 8px">صافي ربح الشركة من البداية: <b>${money(allNet)}</b> (العمولات + الإيرادات الأخرى − الرواتب − المصاريف)</p>
-          ${partners.map((p) => { const due = allNet * Number(p.share) / 100 - Number(p.withdrawals);
-            return `<div class="partner"><div class="spread"><b>${esc(p.name)} · ${Number(p.share)}%</b>
-              <div class="row" style="flex-wrap:nowrap"><button class="btn sm ok" data-act="pWithdraw" data-id="${p.id}">سحب</button><button class="btn sm" data-act="pCapital" data-id="${p.id}">رأس مال</button><button class="btn sm ghost" data-act="pShare" data-id="${p.id}" data-share="${p.share}">النسبة</button></div></div>
-              <div class="small muted">حصته من الربح ${money(allNet * Number(p.share) / 100)} · سحب ${money(p.withdrawals)} · رأس ماله ${money(p.capital)}</div>
-              <div class="small">باقي إله: <b class="${due >= 0 ? "neg" : "pos"}">${money(due)}</b></div></div>`; }).join("") || `<div class="empty">ضيف الشريكين ونسبة كل واحد</div>`}
-          <form id="partnerForm" class="exp-form" style="margin-top:10px">
-            <input name="name" placeholder="اسم الشريك" required>
-            <input name="share" inputmode="numeric" class="ltr" placeholder="النسبة %" required>
-            <button class="btn dark">إضافة شريك</button>
-          </form>
-        </section>
-      </div>
-      <div class="spread" style="margin-top:24px"><h2 style="margin:0">حسابات الشهر</h2><input type="month" id="accMonth" value="${month}" style="width:auto"></div>
+      <div class="spread"><h2 style="margin:0">الحسابات</h2><label class="row" style="margin:0;gap:8px;color:var(--ink)"><span class="small muted">الشهر</span><input type="month" id="accMonth" value="${month}" style="width:auto"></label></div>
       <div class="stats five" style="margin-top:12px">
         <div class="stat"><div class="v">${money(commission)}</div><div class="l">العمولات (${orders.length} طلب)</div></div>
         <div class="stat"><div class="v">${money(received)}</div><div class="l">استلمت من السائقين</div></div>
         <div class="stat"><div class="v">${money(salaries)}</div><div class="l">الرواتب</div></div>
         <div class="stat"><div class="v">${money(other)}</div><div class="l">المصاريف</div></div>
-        <div class="stat ${net >= 0 ? "good" : "badv"}"><div class="v">${money(net)}</div><div class="l">الصافي (عمولات − رواتب − مصاريف)</div></div>
+        <div class="stat ${net >= 0 ? "good" : "badv"}"><div class="v">${money(net)}</div><div class="l">صافي الشهر</div></div>
       </div>
-      <p class="small muted">ديون على السائقين هسه (ما مستلمة بعد): <b>${money(debt)}</b></p>
-      <div class="dash">
+      <p class="small muted" style="margin:6px 0 0">ديون على السائقين هسه (ما مستلمة بعد): <b>${money(debt)}</b></p>
+      <div class="acc-grid">
         <section class="card">
-          <h3>المصاريف</h3>
-          <div class="row"><button class="btn primary" data-act="newVoucher" data-type="spend">+ سند صرف (مصروف)</button><button class="btn ghost" data-tab-go="vouchers">كل السندات</button></div>
-          ${Object.keys(byCat).length ? `<div class="row" style="margin:10px 0">${Object.entries(byCat).sort((a, b) => b[1] - a[1]).map(([c, v]) => `<span class="chip">${esc(c)}: ${Number(v).toLocaleString("en-US")}</span>`).join("")}</div>` : ""}
-          ${exps.map((e) => `<div class="ledger-item"><div><b>${esc(e.category)}</b>${e.employee_id ? ` · ${esc(emps.find((x) => x.id === e.employee_id)?.name || "")}` : ""}${e.note ? ` · ${esc(e.note)}` : ""}<div class="small muted">${esc(e.spent_on)}</div></div>
-            <div class="row" style="flex-wrap:nowrap"><b>${money(e.amount)}</b><button class="btn sm ghost" data-act="delExp" data-id="${e.id}" data-voucher="${e.voucher_id || ""}" title="حذف">✕</button></div></div>`).join("") || `<div class="empty">ماكو مصاريف بهذا الشهر</div>`}
+          <h3>💰 النقد اللي عندكم (من البداية)</h3>
+          <div class="acc-line"><span>استلمتوا من السائقين</span><b class="neg">+${money(T.received)}</b></div>
+          <div class="acc-line"><span>رأس مال الشركاء</span><b class="neg">+${money(T.capital)}</b></div>
+          <div class="acc-line"><span>إيرادات أخرى</span><b class="neg">+${money(T.other_income)}</b></div>
+          <div class="acc-line"><span>مصاريف</span><b class="pos">−${money(T.expenses)}</b></div>
+          <div class="acc-line"><span>رواتب</span><b class="pos">−${money(T.salaries)}</b></div>
+          <div class="acc-line"><span>سحوبات الشركاء</span><b class="pos">−${money(T.withdrawals)}</b></div>
+          <div class="acc-line"><span>دفعات أخرى</span><b class="pos">−${money(Number(T.other_payments || 0) + Number(T.driver_payouts || 0))}</b></div>
+          <div class="acc-line total"><span>الرصيد</span><b>${money(cashIn - cashOut)}</b></div>
+          <p class="small muted" style="margin:8px 0 0">تفاصيل كل صندوق بتبويب <a href="#" data-tab-go="boxes">الصناديق</a></p>
         </section>
         <section class="card">
-          <h3>الموظفين والرواتب</h3>
+          <h3>🤝 الشركاء</h3>
+          ${partners.length && Math.abs(shareSum - 100) > 0.01 ? `<div class="alert warn small" style="margin-bottom:8px">مجموع النسب ${shareSum}% لازم يكون 100%</div>` : ""}
+          <p class="small muted" style="margin:-6px 0 8px">صافي الربح من البداية: <b>${money(allNet)}</b></p>
+          ${partners.map((p) => { const due = allNet * Number(p.share) / 100 - Number(p.withdrawals);
+            return `<div class="partner"><div class="spread"><b>${esc(p.name)} · ${Number(p.share)}%</b>
+              <div class="row" style="flex-wrap:nowrap"><button class="btn sm ok" data-act="pWithdraw" data-id="${p.id}">سحب</button><button class="btn sm" data-act="pCapital" data-id="${p.id}">رأس مال</button><button class="btn sm ghost" data-act="pShare" data-id="${p.id}" data-share="${p.share}">النسبة</button></div></div>
+              <div class="small muted">حصته ${money(allNet * Number(p.share) / 100)} · سحب ${money(p.withdrawals)} · رأس ماله ${money(p.capital)}</div>
+              <div class="small">باقي إله: <b class="${due >= 0 ? "neg" : "pos"}">${money(due)}</b></div></div>`; }).join("") || `<div class="empty">ضيف الشريكين ونسبة كل واحد</div>`}
+          <details class="add-box" ${partners.length ? "" : "open"}><summary>+ إضافة شريك</summary>
+          <form id="partnerForm" class="exp-form">
+            <input name="name" placeholder="اسم الشريك" required>
+            <input name="share" inputmode="numeric" class="ltr" placeholder="النسبة %" required>
+            <button class="btn dark">إضافة</button>
+          </form></details>
+        </section>
+        <section class="card">
+          <h3>👥 الموظفين والرواتب</h3>
           ${emps.map((e) => { const p = paid[e.id] || 0, left = Math.max(0, Number(e.monthly_salary) - p);
-            return `<div class="ledger-item" style="align-items:center"><div><b>${esc(e.name)}</b>${e.job ? ` · ${esc(e.job)}` : ""}${!e.active ? ` <span class="chip st-cancelled">متوقف</span>` : ""}
+            return `<div class="emp-row"><div class="emp-info"><b>${esc(e.name)}</b>${e.job ? ` <span class="small muted">· ${esc(e.job)}</span>` : ""}${!e.active ? ` <span class="chip st-cancelled">متوقف</span>` : ""}
               <div class="small muted">الراتب ${money(e.monthly_salary)} · انصرف ${money(p)}${left ? ` · باقي <b style="color:var(--warn)">${Number(left).toLocaleString("en-US")}</b>` : " ✓"}</div></div>
-              <div class="row" style="flex-wrap:nowrap">${e.active ? `<button class="btn sm ok" data-act="paySalary" data-id="${e.id}" data-left="${left}">صرف راتب</button>` : ""}
+              <div class="row emp-act">${e.active ? `<button class="btn sm ok" data-act="paySalary" data-id="${e.id}" data-left="${left}">صرف راتب</button><button class="btn sm" data-act="payAdvance" data-id="${e.id}">صرف سلفة</button>` : ""}
               <button class="btn sm ghost" data-act="toggleEmp" data-id="${e.id}">${e.active ? "إيقاف" : "تفعيل"}</button></div></div>`; }).join("") || `<div class="empty">ماكو موظفين بعد</div>`}
-          <div class="hr"></div>
+          <details class="add-box" ${emps.length ? "" : "open"}><summary>+ إضافة موظف</summary>
           <form id="empForm" class="exp-form">
             <input name="name" placeholder="اسم الموظف" required>
             <input name="job" placeholder="الوظيفة (محاسب، موزع...)">
             <input name="monthly_salary" inputmode="numeric" class="ltr" placeholder="الراتب الشهري" required>
-            <button class="btn dark">إضافة موظف</button>
-          </form>
+            <button class="btn dark">إضافة</button>
+          </form></details>
+        </section>
+        <section class="card">
+          <h3>🧾 مصاريف الشهر <span class="small muted">(${money(salaries + other)})</span></h3>
+          ${catRows.map(([c, v]) => `<div class="bar-row"><span>${esc(c)}</span><div class="bar"><i style="width:${Math.round(v / catMax * 100)}%"></i></div><b>${Number(v).toLocaleString("en-US")}</b></div>`).join("") || `<div class="empty">ماكو مصاريف بهذا الشهر</div>`}
+          ${exps.length ? `<details class="add-box"><summary>عرض التفاصيل (${exps.length})</summary>
+            ${exps.map((e) => `<div class="ledger-item"><div><b>${esc(e.category)}</b>${e.employee_id ? ` · ${esc(emps.find((x) => x.id === e.employee_id)?.name || "")}` : ""}${e.note ? ` · ${esc(e.note)}` : ""}<div class="small muted">${esc(e.spent_on)}</div></div><b>${money(e.amount)}</b></div>`).join("")}</details>` : ""}
+          <p class="small muted" style="margin:8px 0 0">المصاريف تنضاف من تبويب <a href="#" data-tab-go="vouchers">السندات</a></p>
         </section>
       </div>`;
     $("#partnerForm").onsubmit = async (e) => {
@@ -1248,12 +1248,16 @@ const Admin = {
       last: ["الشهر الماضي", iso(new Date(now.getFullYear(), now.getMonth() - 1, 1)), iso(new Date(now.getFullYear(), now.getMonth(), 0))],
     };
     S.rep ||= { key: "month", from: presets.month[1], to: presets.month[2] };
-    m.innerHTML = `<div class="card no-print"><div class="row">
+    S.repView ||= "profit";
+    m.innerHTML = `<div class="seg no-print" style="margin-bottom:12px"><button data-rv="profit" class="${S.repView === "profit" ? "on" : ""}">📈 تقرير الأرباح</button><button data-rv="vouchers" class="${S.repView === "vouchers" ? "on" : ""}">🧾 تقرير السندات</button></div>
+      <div class="card no-print"><div class="row">
         ${Object.entries(presets).map(([k, [l]]) => `<button class="btn sm ${S.rep.key === k ? "dark" : "ghost"}" data-preset="${k}">${l}</button>`).join("")}
         <span class="row date-range"><input type="date" id="rFrom" value="${S.rep.from}" style="width:auto"> إلى <input type="date" id="rTo" value="${S.rep.to}" style="width:auto"><button class="btn sm dark" id="rGo">عرض</button></span>
       </div></div><div id="repOut"><div class="spinner" style="margin:40px auto"></div></div>`;
     m.querySelectorAll("[data-preset]").forEach((b) => (b.onclick = () => { const [, f, t] = presets[b.dataset.preset]; S.rep = { key: b.dataset.preset, from: f, to: t }; this.renderReports(); }));
     $("#rGo").onclick = () => { S.rep = { key: "custom", from: $("#rFrom").value, to: $("#rTo").value }; this.renderReports(); };
+    m.querySelectorAll("[data-rv]").forEach((b) => (b.onclick = () => { S.repView = b.dataset.rv; this.renderReports(); }));
+    if (S.repView === "vouchers") return this.renderVoucherReport();
     const [{ data: R, error }, { data: T }] = await Promise.all([rpc0("profit_report", { p_from: S.rep.from, p_to: S.rep.to }), rpc0("finance_totals")]);
     if (error) { $("#repOut").innerHTML = `<div class="alert bad">${esc(error.message)}</div>`; return; }
     const net = Number(R.commission) + Number(R.other_income || 0) - Number(R.salaries) - Number(R.expenses);
@@ -1367,14 +1371,15 @@ const Admin = {
     const today = new Date().toISOString().slice(0, 10);
     const parties = type === "receive" ? [["driver", "سائق (تسديد دين)"], ["partner", "شريك (رأس مال)"], ["other", "جهة أخرى (إيراد)"]]
       : type === "pay" ? [["partner", "شريك (سحب)"], ["driver", "سائق"], ["employee", "موظف (سلفة)"], ["other", "جهة أخرى"]]
-      : [["other", "جهة"], ["employee", "موظف (راتب)"]];
+      : pre.party_type === "employee" ? [["employee", "موظف"]] : [["other", "جهة"]];
     const pt = pre.party_type || parties[0][0];
     const debtOf = (id) => Number(S.balances?.[id]?.debt || 0);
-    modal(`<div class="vhead vt-${type}"><h3 style="margin:0">${VT[type]} جديد</h3><span class="small">${type === "receive" ? "فلوس داخلة للقاصة" : type === "spend" ? "مصروف ينزل من الأرباح" : "فلوس طالعة من القاصة"}</span></div>
+    const title = pre.party_type === "employee" ? (type === "spend" ? "صرف راتب" : "صرف سلفة") : `${VT[type]} جديد`;
+    modal(`<div class="vhead vt-${type}"><h3 style="margin:0">${title}</h3><span class="small">${type === "receive" ? "فلوس داخلة للقاصة" : type === "spend" ? "مصروف ينزل من الأرباح" : "فلوس طالعة من القاصة"}</span></div>
       <form id="vForm" class="vform">
         <input type="hidden" name="party_type" value="${pt}"><input type="hidden" name="party_id" value="${esc(pre.party_id || "")}">
-        <label>${type === "receive" ? "استلمنا من" : type === "spend" ? "صرفنا إلى" : "دفعنا إلى"}</label>
-        <div class="seg seg-wide" id="ptSeg">${parties.map(([k, l]) => `<button type="button" data-pt="${k}" class="${k === pt ? "on" : ""}">${l}</button>`).join("")}</div>
+        <label ${parties.length < 2 ? "hidden" : ""}>${type === "receive" ? "استلمنا من" : type === "spend" ? "صرفنا إلى" : "دفعنا إلى"}</label>
+        <div class="seg seg-wide" id="ptSeg" ${parties.length < 2 ? "hidden" : ""}>${parties.map(([k, l]) => `<button type="button" data-pt="${k}" class="${k === pt ? "on" : ""}">${l}</button>`).join("")}</div>
         <div id="pSel" style="margin-top:10px"></div>
         ${type === "spend" ? `<div class="field" style="margin-top:12px"><label>نوع المصروف</label><input type="hidden" name="category" value="${esc(pre.category || "مصاريف عامة")}">
           <div class="cat-chips" id="catChips"></div>
@@ -1385,7 +1390,7 @@ const Admin = {
           <div class="field" style="flex:1.4"><label>المبلغ (د.ع)</label><input name="amount" inputmode="numeric" class="ltr big-amt" required value="${esc(pre.amount ?? "")}" placeholder="0"></div>
           <div class="field" style="flex:1"><label>التاريخ</label><input type="date" name="date" value="${today}" required></div></div>
         <div id="amtWords" class="small muted" style="margin:-6px 0 10px"></div>
-        <div class="field"><label>البيان / ملاحظة</label><input name="note" placeholder="${type === "spend" ? "مثلاً: بانزين للسيارة" : "اختياري"}"></div>
+        <div class="field"><label>البيان / ملاحظة</label><input name="note" value="${esc(pre.note || "")}" placeholder="${type === "spend" ? "مثلاً: بانزين للسيارة" : "اختياري"}"></div>
         <div class="row" style="flex-wrap:nowrap"><button class="btn big ${type === "receive" ? "ok" : type === "spend" ? "bad" : "dark"}" style="flex:1">حفظ السند</button><button type="button" class="btn ghost" data-close>إلغاء</button></div>
       </form>`, (bg, close) => {
       const f = $("#vForm", bg);
@@ -1396,6 +1401,7 @@ const Admin = {
       const drawParty = () => {
         const t = f.party_type.value, box = $("#pSel", bg);
         bg.querySelectorAll("[data-pt]").forEach((b) => b.classList.toggle("on", b.dataset.pt === t));
+        if (t === "other" && type === "spend") { f.party_id.value = ""; box.innerHTML = ""; return; }
         if (t === "other") { f.party_id.value = ""; box.innerHTML = `<div class="field"><label>الاسم</label><input name="party_name" placeholder="${type === "receive" ? "من منو؟" : "لمنو؟"}" ${type === "spend" ? "" : "required"}></div>`; return; }
         const items = listFor(t);
         if (!items.length) { box.innerHTML = `<div class="alert warn small">ماكو ${LBL[t]}. ${t === "driver" ? "ضيفهم من تبويب السائقين" : "ضيفهم أول من تبويب الحسابات"}</div>`; return; }
@@ -1505,6 +1511,68 @@ const Admin = {
     w.document.close();
   },
   // ----- daily movement (الحركة اليومية) -----
+  async renderVoucherReport() {
+    const out = $("#repOut");
+    const [vq, bq] = await Promise.all([
+      sb.from("vouchers").select("*").gte("voucher_date", S.rep.from).lte("voucher_date", S.rep.to).order("voucher_date").order("id").limit(5000),
+      sb.from("cash_boxes").select("id,name"),
+    ]);
+    if (vq.error) { out.innerHTML = `<div class="alert bad">${esc(vq.error.message)}</div>`; return; }
+    const all = vq.data || [], live = all.filter((v) => !v.cancelled), cancelled = all.filter((v) => v.cancelled);
+    const bn = (id) => (bq.data || []).find((b) => b.id === id)?.name || "";
+    const n = (v) => Number(v || 0).toLocaleString("en-US");
+    const sum = (arr) => arr.reduce((a, v) => a + Number(v.amount), 0);
+    const by = (t) => live.filter((v) => v.vtype === t);
+    const rec = sum(by("receive")), spd = sum(by("spend")), pay = sum(by("pay"));
+    const group = (arr, key) => { const g = {}; arr.forEach((v) => { const k = key(v) || "—"; g[k] ||= { n: 0, in: 0, out: 0 }; g[k].n++; v.vtype === "receive" ? (g[k].in += Number(v.amount)) : (g[k].out += Number(v.amount)); }); return Object.entries(g); };
+    const cats = group(by("spend"), (v) => v.category).sort((a, b) => b[1].out - a[1].out);
+    const catMax = Math.max(1, ...cats.map((c) => c[1].out));
+    const parties = group(live, (v) => v.party_name).sort((a, b) => (b[1].in + b[1].out) - (a[1].in + a[1].out)).slice(0, 15);
+    const boxes = group(live, (v) => bn(v.box_id));
+    const days = group(live, (v) => v.voucher_date).sort((a, b) => a[0].localeCompare(b[0]));
+    const PT = { driver: "سائق", partner: "شريك", employee: "موظف", other: "جهة" };
+    S.vrType ||= "all";
+    const listed = (S.vrType === "cancelled" ? cancelled : S.vrType === "all" ? live : by(S.vrType));
+    const tbl = (head, rows, foot = "") => `<div class="table-wrap"><table><thead><tr>${head.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.join("") || `<tr><td colspan="${head.length}" class="empty">ماكو بيانات</td></tr>`}${foot}</tbody></table></div>`;
+    out.innerHTML = `
+      <div class="spread" style="margin:16px 0 8px"><h2 style="margin:0">تقرير السندات · من <span class="num">${S.rep.from}</span> إلى <span class="num">${S.rep.to}</span></h2>
+        <div class="row no-print"><button class="btn sm" id="vrCsv">⬇ تنزيل Excel</button><button class="btn sm" onclick="window.print()">🖨 طباعة</button></div></div>
+      <div class="stats five">
+        <div class="stat"><div class="v neg">${money(rec)}</div><div class="l">سندات القبض (${by("receive").length})</div></div>
+        <div class="stat"><div class="v pos">${money(spd)}</div><div class="l">سندات الصرف (${by("spend").length})</div></div>
+        <div class="stat"><div class="v pos">${money(pay)}</div><div class="l">سندات الدفع (${by("pay").length})</div></div>
+        <div class="stat ${rec - spd - pay >= 0 ? "good" : "badv"}"><div class="v">${money(rec - spd - pay)}</div><div class="l">الفرق (قبض − صرف − دفع)</div></div>
+        <div class="stat"><div class="v num">${cancelled.length}</div><div class="l">سندات محذوفة (${n(sum(cancelled))})</div></div>
+      </div>
+      <div class="acc-grid">
+        <section class="card"><h3>المصاريف حسب التبويب</h3>
+          ${cats.map(([c, g]) => `<div class="bar-row"><span>${esc(c)} <small class="muted">(${g.n})</small></span><div class="bar"><i style="width:${Math.round(g.out / catMax * 100)}%"></i></div><b>${n(g.out)}</b></div>`).join("") || `<div class="empty">ماكو سندات صرف</div>`}
+          ${cats.length ? `<div class="acc-line total"><span>المجموع</span><b>${money(spd)}</b></div>` : ""}</section>
+        <section class="card pad0"><div class="panel-h">حسب الجهة (أعلى ${parties.length})</div>
+          ${tbl(["الجهة", "عدد", "قبض", "صرف + دفع"], parties.map(([k, g]) => `<tr><td>${esc(k)}</td><td class="num">${g.n}</td><td class="num neg">${g.in ? n(g.in) : ""}</td><td class="num pos">${g.out ? n(g.out) : ""}</td></tr>`))}</section>
+        <section class="card pad0"><div class="panel-h">يومياً</div>
+          ${tbl(["اليوم", "قبض", "صرف", "دفع", "الفرق"], days.map(([d]) => { const dv = live.filter((v) => v.voucher_date === d); const r = sum(dv.filter((v) => v.vtype === "receive")), sp = sum(dv.filter((v) => v.vtype === "spend")), pa = sum(dv.filter((v) => v.vtype === "pay"));
+            return `<tr><td class="num">${d}</td><td class="num neg">${n(r)}</td><td class="num pos">${n(sp)}</td><td class="num pos">${n(pa)}</td><td class="num"><b>${n(r - sp - pa)}</b></td></tr>`; }),
+            `<tr class="tot"><td><b>المجموع</b></td><td class="num neg"><b>${n(rec)}</b></td><td class="num pos"><b>${n(spd)}</b></td><td class="num pos"><b>${n(pay)}</b></td><td class="num"><b>${n(rec - spd - pay)}</b></td></tr>`)}</section>
+        <section class="card pad0"><div class="panel-h">حسب الصندوق</div>
+          ${tbl(["الصندوق", "عدد", "داخل", "طالع", "الفرق"], boxes.map(([k, g]) => `<tr><td>💰 ${esc(k)}</td><td class="num">${g.n}</td><td class="num neg">${n(g.in)}</td><td class="num pos">${n(g.out)}</td><td class="num"><b>${n(g.in - g.out)}</b></td></tr>`))}</section>
+      </div>
+      <div class="spread" style="margin-top:20px"><h3 style="margin:0">كل السندات (${listed.length})</h3>
+        <div class="row no-print">${[["all", "الكل"], ["receive", "قبض"], ["spend", "صرف"], ["pay", "دفع"], ["cancelled", "المحذوفة"]].map(([k, l]) => `<button class="btn sm ${S.vrType === k ? "dark" : "ghost"}" data-vrt="${k}">${l}</button>`).join("")}</div></div>
+      <div class="card pad0" style="margin-top:8px">${tbl(["السند", "التاريخ", "الجهة", "التبويب", "الصندوق", "المبلغ", "البيان"],
+        listed.map((v) => `<tr class="${v.cancelled ? "voided" : ""}"><td><span class="chip vt-${v.vtype}">${VT[v.vtype]} #${v.number}</span></td><td class="num">${v.voucher_date}</td><td>${esc(v.party_name || "")} <small class="muted">${PT[v.party_type] || ""}</small></td><td>${esc(v.category || "")}</td><td>${esc(bn(v.box_id))}</td><td class="num"><b>${n(v.amount)}</b></td><td>${esc(v.cancelled ? `محذوف: ${v.cancel_reason || ""}` : v.note || "")}</td></tr>`),
+        listed.length ? `<tr class="tot"><td colspan="5"><b>المجموع</b></td><td class="num"><b>${n(sum(listed))}</b></td><td></td></tr>` : "")}</div>`;
+    out.querySelectorAll("[data-vrt]").forEach((b) => (b.onclick = () => { S.vrType = b.dataset.vrt; this.renderVoucherReport(); }));
+    $("#vrCsv").onclick = () => {
+      const rows = [["تقرير السندات", S.rep.from, S.rep.to], [], ["قبض", rec], ["صرف", spd], ["دفع", pay], ["الفرق", rec - spd - pay], [],
+        ["التبويب", "عدد", "المبلغ"], ...cats.map(([c, g]) => [c, g.n, g.out]), [],
+        ["السند", "رقم", "التاريخ", "الجهة", "نوع الجهة", "التبويب", "الصندوق", "المبلغ", "البيان", "الحالة"],
+        ...all.map((v) => [VT[v.vtype], v.number, v.voucher_date, v.party_name, PT[v.party_type], v.category, bn(v.box_id), v.amount, v.note, v.cancelled ? `محذوف: ${v.cancel_reason || ""}` : ""])];
+      const csv = "﻿" + rows.map((r) => r.map((c) => `"${String(c ?? "").replace(/"/g, '""')}"`).join(",")).join("\r\n");
+      const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+      a.download = `vouchers-${S.rep.from}-${S.rep.to}.csv`; a.click();
+    };
+  },
   // ----- cash boxes -----
   async renderBoxes() {
     const m = $("#amain");
@@ -1715,6 +1783,7 @@ const Admin = {
         await rpc("cancel_voucher", { p_id: Number(id), p_reason: reason }); toast("انحذف السند وانتقل للمحذوفات"); this.renderVouchers();
       }
       if (act === "toggleEmp") { const { data: e } = await sb.from("employees").select("active").eq("id", id).single(); await sb.from("employees").update({ active: !e.active }).eq("id", id); this.renderAccounts(); }
+      if (act === "payAdvance") return this.voucherModal("pay", { party_type: "employee", party_id: id, note: "سلفة" });
       if (act === "paySalary") return this.voucherModal("spend", { category: "رواتب", party_type: "employee", party_id: id, amount: b.dataset.left, salary_month: `${S.accMonth || new Date().toISOString().slice(0, 7)}-01` });
       if (act === "unflag") { await sb.from("flagged_phones").delete().eq("phone", b.dataset.phone); this.renderFlagged(); }
     } catch (err) { toast(errMsg(err), true); }

@@ -330,3 +330,17 @@ tr.tot td { border-top: 2px solid var(--ink); background: var(--surface-2); }
 .box-name { font-size: 17px; }
 .box-bal { font-size: 30px; font-weight: 700; }
 .box-today { display: flex; gap: 14px; font-size: 14px; color: var(--ink-2); }
+.cat-add[hidden], .vform [hidden] { display: none !important; }
+
+/* accounts layout */
+.acc-grid { display: grid; gap: 16px; margin-top: 16px; grid-template-columns: 1fr; align-items: start; }
+@media (min-width: 900px) { .acc-grid { grid-template-columns: 1fr 1fr; } }
+.add-box { margin-top: 10px; border-top: 1px dashed var(--line); padding-top: 8px; }
+.add-box summary { cursor: pointer; font-weight: 600; color: var(--ink-2); padding: 4px 0; }
+.add-box .exp-form { margin-top: 8px; }
+.emp-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.emp-info { min-width: 0; flex: 1 1 200px; }
+.emp-act { flex-wrap: nowrap; }
+.bar-row { display: grid; grid-template-columns: minmax(90px, 30%) 1fr auto; gap: 10px; align-items: center; padding: 6px 0; font-size: 14px; }
+.bar { background: var(--surface-2); border-radius: 999px; height: 10px; overflow: hidden; }
+.bar i { display: block; height: 100%; background: var(--bad); border-radius: 999px; }
