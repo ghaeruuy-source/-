@@ -516,14 +516,13 @@ const Restaurant = {
     return `${Push.banner("restaurant").replace('margin-top:12px', 'margin-bottom:12px')}
     <form class="card" id="orderForm" autocomplete="off">
       <h2>طلب سائق جديد</h2>
-      <div class="field"><label>اسم الزبون</label><input name="name" required></div>
-      <div class="field"><label>رقم الزبون</label><input name="phone" type="tel" inputmode="tel" placeholder="07xx xxx xxxx" required><div id="phoneWarn"></div></div>
       <div class="field"><label>المنطقة</label>
         <select name="zone" required><option value="">اختار المنطقة</option>
           ${S.zones.filter((z) => z.active).map((z) => `<option value="${z.id}">${esc(z.name)} — ${Number(z.delivery_fee).toLocaleString("en-US")} د.ع</option>`).join("")}
         </select></div>
-      <div class="field"><label>العنوان بالتفصيل</label><input name="address" placeholder="قرب... / شارع... / بيت..." required></div>
       <div class="field"><label>مبلغ الطلب (بدون توصيل)</label><input name="total" type="text" inputmode="numeric" placeholder="مثلاً 15000" required></div>
+      <div class="field"><label>رقم الزبون</label><input name="phone" type="tel" inputmode="tel" placeholder="07xx xxx xxxx" required><div id="phoneWarn"></div></div>
+      <div class="field"><label>العنوان بالتفصيل</label><input name="address" placeholder="قرب... / شارع... / بيت..." required></div>
       <div class="field"><label>ملاحظات (اختياري)</label><input name="notes"></div>
       <div id="sum" class="alert info" hidden></div>
       <button class="btn primary block big" style="margin-top:12px">اطلب سائق</button>
@@ -555,7 +554,7 @@ const Restaurant = {
         let pos = {};
         if (S.profile.lat == null) { try { pos = await getPosition(); } catch (_) {} }
         const o = await rpc("create_order", {
-          p_customer_name: f.name.value, p_customer_phone: normPhone(f.phone.value), p_zone_id: Number(f.zone.value),
+          p_customer_name: null, p_customer_phone: normPhone(f.phone.value), p_zone_id: Number(f.zone.value),
           p_address: f.address.value, p_order_total: toNum(f.total.value), p_notes: f.notes.value || null,
           p_lat: pos.lat ?? null, p_lng: pos.lng ?? null,
         });
