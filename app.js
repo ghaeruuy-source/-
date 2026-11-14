@@ -503,7 +503,11 @@ const Restaurant = {
       this.placePut(p, 17);
       if (msg) msg.textContent = "✓ تحدد موقعك. تأكد الدبوس على المحل بالضبط وبعدين ثبّته.";
     } catch (err) {
-      if (msg) msg.innerHTML = `<span class="bad-t">${esc(errMsg(err))}</span> · إذا رفضت الإذن: افتح إعدادات المتصفح ← الموقع ← اسمح، أو حدده يدوياً على الخريطة.`;
+      const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
+      if (msg) msg.innerHTML = `<div class="alert warn small" style="text-align:start"><b>${esc(errMsg(err))}</b><br>${ios
+        ? "بالآيفون: <b>الإعدادات ← الخصوصية والأمن ← خدمات الموقع</b> (لازم تكون شغالة) ← <b>مواقع Safari</b> ← اختار <b>أثناء الاستخدام</b> وشغّل <b>الموقع الدقيق</b>. وإذا فاتح الرابط من داخل واتساب، افتحه بـ Safari. بعدين ارجع دوس الزر."
+        : "افتح إعدادات المتصفح ← إعدادات المواقع ← الموقع ← اسمح لهذا الموقع، وتأكد الـ GPS شغال. بعدين ارجع دوس الزر."}
+        <br>أو <b>دوس على الخريطة بمكان المحل</b> وثبّته يدوياً.</div>`;
       if (!silent) toast(errMsg(err), true);
     }
   },
