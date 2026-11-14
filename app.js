@@ -19,7 +19,7 @@ const S = {
 const $ = (s, r = document) => r.querySelector(s);
 const app = () => $("#app");
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const money = (n) => `<span class="num">${Number(n || 0).toLocaleString("en-US")}</span> د.ع`;
+const money = (n) => `<bdi dir="ltr" class="num">${Number(n || 0).toLocaleString("en-US")}</bdi> د.ع`;
 const normPhone = (p) => {
   let d = String(p || "").replace(/[^0-9٠-٩]/g, "").replace(/[٠-٩]/g, (c) => "٠١٢٣٤٥٦٧٨٩".indexOf(c));
   if (d.startsWith("964")) d = "0" + d.slice(3);
@@ -172,8 +172,23 @@ function modal(html, onMount) {
 }
 
 // ---------- branding ----------
+const FONTS = {
+  "IBM Plex Sans Arabic": "400;500;600;700", "Cairo": "400;500;600;700", "Tajawal": "400;500;700",
+  "Almarai": "400;700;800", "Noto Kufi Arabic": "400;500;600;700", "Readex Pro": "400;500;600;700",
+  "Changa": "400;500;600;700", "El Messiri": "400;500;600;700", "Rubik": "400;500;600;700", "Baloo Bhaijaan 2": "400;500;600;700",
+};
+function loadFont(f) {
+  if (!FONTS[f] || (loadFont.done ||= {})[f]) return;
+  loadFont.done[f] = 1;
+  const l = document.createElement("link"); l.rel = "stylesheet";
+  l.href = `https://fonts.googleapis.com/css2?family=${f.replace(/ /g, "+")}:wght@${FONTS[f]}&display=swap`;
+  document.head.appendChild(l);
+}
 function applyBranding() {
   const s = S.settings || {};
+  const font = FONTS[s.font_family] ? s.font_family : "IBM Plex Sans Arabic";
+  loadFont(font);
+  document.documentElement.style.setProperty("--font", `"${font}"`);
   const color = s.primary_color || "#E8590C";
   document.documentElement.style.setProperty("--brand", color);
   document.querySelector('meta[name="theme-color"]').setAttribute("content", color);
@@ -719,14 +734,12 @@ const Admin = {
     app().innerHTML = `${topbar("الإدارة")}<nav class="tabs" id="atabs"></nav><main class="wrap" id="amain"></main>`;
     $("#atabs").onclick = (e) => { const t = e.target.closest("[data-tab]"); if (t) { S.tab = t.dataset.tab; this.render(); } };
     $("#amain").addEventListener("click", (e) => this.onClick(e));
-    window.addEventListener("resize", () => { if (S.tab === "live") this.fitLive(); });
+    $("#amain").addEventListener("click", (e) => { const g = e.target.closest("[data-tab-go]"); if (g) { S.tab = g.dataset.tabGo; this.render(); } });
+    window.addEventListener("resize", () => { if (S.tab === "map") this.fitLive(); });
     $("#amain").addEventListener("click", (e) => {
       if (e.target.closest("[data-act], a")) return;
-      const row = e.target.closest("[data-focus]"); if (!row || !S.maps.admin) return;
-      const o = S.orders.find((x) => x.id === Number(row.dataset.focus));
-      const d = S.drivers[o?.driver_id || o?.offered_driver_id], r = S.restaurants[o?.restaurant_id];
-      const target = d?.lat != null ? [d.lat, d.lng] : r?.lat != null ? [r.lat, r.lng] : null;
-      if (target) { S.maps.admin.setView(target, 16); (S.markers["d" + d?.id] || S.markers["r" + r?.id])?.openPopup(); }
+      const row = e.target.closest("[data-focus]"); if (!row) return;
+      S.focusOrder = Number(row.dataset.focus); S.tab = "map"; this.render();
     });
     await this.load();
     this.subscribe();
@@ -774,15 +787,17 @@ const Admin = {
   },
   render(soft = false) {
     const active = S.orders.filter((o) => ACTIVE.includes(o.status));
-    const tabs = [["live", `المباشر${active.length ? `<span class="pill-count">${active.length}</span>` : ""}`], ["drivers", "السائقين"], ["restaurants", "المطاعم"], ["zones", "المناطق والأجور"], ["orders", "كل الطلبات"], ["flagged", "أرقام مرفوضة"], ["settings", "الإعدادات"]];
+    const tabs = [["live", `الرئيسية${active.length ? `<span class="pill-count">${active.length}</span>` : ""}`], ["map", "🗺 الخريطة"], ["drivers", "السائقين"], ["restaurants", "المطاعم"], ["orders", "كل الطلبات"], ["accounts", "الحسابات"], ["zones", "المناطق والأجور"], ["flagged", "أرقام مرفوضة"], ["settings", "الإعدادات"]];
     $("#atabs").innerHTML = tabs.map(([k, l]) => `<button class="tab ${S.tab === k ? "on" : ""}" data-tab="${k}">${l}</button>`).join("");
     const m = $("#amain");
     // forms shouldn't be wiped by realtime updates
-    if (soft && ["settings", "zones", "flagged"].includes(S.tab) && m.dataset.view === S.tab) return;
-    document.body.classList.toggle("live-mode", S.tab === "live");
-    if (S.tab !== "live" && S.maps.admin) { S.maps.admin.remove(); S.maps.admin = null; S.markers = {}; S.fitted = false; }
+    if (soft && ["settings", "zones", "flagged", "accounts", "orders"].includes(S.tab) && m.dataset.view === S.tab) return;
+    document.body.classList.toggle("live-mode", S.tab === "map");
+    if (S.tab !== "map" && S.maps.admin) { S.maps.admin.remove(); S.maps.admin = null; S.markers = {}; S.fitted = false; }
     m.dataset.view = S.tab;
     if (S.tab === "live") return this.renderLive();
+    if (S.tab === "map") return this.renderMap();
+    if (S.tab === "accounts") return this.renderAccounts();
     if (S.tab === "drivers") return this.renderDrivers();
     if (S.tab === "restaurants") return this.renderRestaurants();
     if (S.tab === "zones") return this.renderZones();
@@ -791,37 +806,51 @@ const Admin = {
     if (S.tab === "settings") return this.renderSettings();
   },
   // ----- live -----
-  renderLive() {
-    const m = $("#amain");
-    if (!S.maps.admin) {
-      m.innerHTML = `<div class="live">
-          <div class="map-full" id="adminMap"></div>
-          <div class="float-stats" id="liveStats"></div>
-          <aside class="side">
-            <section class="panel feed-panel"><div class="panel-h">آخر الأحداث</div><div id="feed"></div></section>
-            <section class="panel"><div class="panel-h">الطلبات النشطة</div><div id="liveOrders"></div></section>
-          </aside>
-        </div>`;
-      S.maps.admin = makeMap($("#adminMap"), 14); S.markers = {};
-      S.maps.admin.zoomControl.setPosition("bottomleft");
-      this.fitLive();
-    }
+  liveNumbers() {
     const active = S.orders.filter((o) => ACTIVE.includes(o.status));
-    const today = S.orders.filter((o) => o.created_at >= startOfToday());
-    const delivered = today.filter((o) => o.status === "delivered");
+    const delivered = S.orders.filter((o) => o.created_at >= startOfToday() && o.status === "delivered");
     const stale = Number(S.settings?.location_stale_min || 10) * 60000;
     const online = Object.values(S.drivers).filter((d) => d.online && d.active && Date.now() - new Date(d.location_at) < stale);
     const totalDebt = Object.values(S.balances || {}).reduce((a, b) => a + Number(b.debt || 0), 0);
-    $("#liveStats").innerHTML = `
-      <div class="fstat"><b class="num">${active.length}</b><span>طلبات نشطة</span></div>
-      <div class="fstat"><b class="num">${online.length}</b><span>سائق متصل</span></div>
-      <div class="fstat"><b class="num">${delivered.length}</b><span>توصّل اليوم</span></div>
-      <div class="fstat"><b>${money(delivered.reduce((a, o) => a + Number(o.commission), 0))}</b><span>عمولة اليوم</span></div>
-      <div class="fstat"><b>${money(totalDebt)}</b><span>الديون الكلية</span></div>
-      <div class="fstat legend"><i class="lg free"></i>فاضي <i class="lg busy"></i>عنده طلب <i class="lg off"></i>مطفي</div>`;
-    $("#liveOrders").innerHTML = active.length ? active.map((o) => this.orderRow(o)).join("") : `<div class="empty">ماكو طلبات نشطة</div>`;
+    return { active, delivered, online, totalDebt, commission: delivered.reduce((a, o) => a + Number(o.commission), 0) };
+  },
+  renderLive() {
+    const n = this.liveNumbers();
+    $("#amain").innerHTML = `
+      <div class="stats five">
+        <div class="stat"><div class="v num">${n.active.length}</div><div class="l">طلبات نشطة</div></div>
+        <div class="stat"><div class="v num">${n.online.length}</div><div class="l">سائق متصل هسه</div></div>
+        <div class="stat"><div class="v num">${n.delivered.length}</div><div class="l">توصّل اليوم</div></div>
+        <div class="stat"><div class="v">${money(n.commission)}</div><div class="l">عمولة اليوم</div></div>
+        <div class="stat"><div class="v">${money(n.totalDebt)}</div><div class="l">ديون على السائقين</div></div>
+      </div>
+      <div class="dash">
+        <section class="card pad0"><div class="panel-h spread"><span>الطلبات النشطة</span><button class="btn sm ghost" data-tab-go="map">🗺 افتح الخريطة</button></div>
+          <div id="liveOrders">${n.active.length ? n.active.map((o) => this.orderRow(o)).join("") : `<div class="empty">ماكو طلبات نشطة هسه</div>`}</div></section>
+        <section class="card pad0"><div class="panel-h">آخر الأحداث</div><div id="feed" class="feed-scroll"></div></section>
+      </div>`;
     this.renderFeed();
+  },
+  renderMap() {
+    const m = $("#amain");
+    if (!S.maps.admin) {
+      m.innerHTML = `<div class="live"><div class="map-full" id="adminMap"></div><div class="float-stats" id="liveStats"></div></div>`;
+      S.maps.admin = makeMap($("#adminMap"), 14); S.markers = {}; S.fitted = false;
+      S.maps.admin.zoomControl.setPosition("bottomleft");
+      this.fitLive();
+    }
+    const n = this.liveNumbers();
+    $("#liveStats").innerHTML = `
+      <div class="fstat"><b class="num">${n.active.length}</b><span>طلبات نشطة</span></div>
+      <div class="fstat"><b class="num">${n.online.length}</b><span>سائق متصل</span></div>
+      <div class="fstat legend"><i class="lg free"></i>فاضي <i class="lg busy"></i>عنده طلب <i class="lg off"></i>مطفي</div>`;
     this.updateMap();
+    if (S.focusOrder) {
+      const o = S.orders.find((x) => x.id === S.focusOrder); S.focusOrder = null;
+      const d = S.drivers[o?.driver_id || o?.offered_driver_id], r = S.restaurants[o?.restaurant_id];
+      const target = d?.lat != null ? [d.lat, d.lng] : r?.lat != null ? [r.lat, r.lng] : null;
+      if (target) { S.fitted = true; setTimeout(() => { S.maps.admin.setView(target, 16); (S.markers["d" + d?.id] || S.markers["r" + r?.id])?.openPopup(); }, 120); }
+    }
   },
   fitLive() {
     const t = $("#atabs").getBoundingClientRect().bottom;
@@ -924,7 +953,7 @@ const Admin = {
       const pts = Object.values(S.markers).map((mk) => mk.getLatLng());
       if (pts.length) {
         const mob = innerWidth <= 760;
-        map.fitBounds(L.latLngBounds(pts), { maxZoom: 15, paddingTopLeft: [40, mob ? 110 : 90], paddingBottomRight: mob ? [40, Math.round(innerHeight * 0.46)] : [420, 60] });
+        map.fitBounds(L.latLngBounds(pts), { maxZoom: 15, paddingTopLeft: [40, mob ? 90 : 90], paddingBottomRight: [40, 50] });
         S.fitted = true;
       }
     }
@@ -1030,6 +1059,87 @@ const Admin = {
       ${(data || []).map((f) => `<div class="ledger-item"><div><b>${tel(f.phone)}</b> · ${f.refused_count} مرة<div class="small muted">${esc(f.note || "")} · ${dateTime(f.updated_at)}</div></div>
         <button class="btn sm ghost" data-act="unflag" data-phone="${esc(f.phone)}">شيله</button></div>`).join("") || `<div class="empty">ماكو أرقام</div>`}</div>`;
   },
+  // ----- accounts -----
+  async renderAccounts() {
+    const m = $("#amain");
+    const month = S.accMonth || new Date().toISOString().slice(0, 7);
+    S.accMonth = month;
+    const [y, mo] = month.split("-").map(Number);
+    const from = new Date(y, mo - 1, 1), to = new Date(y, mo, 1);
+    const fromD = `${month}-01`, toD = `${to.getFullYear()}-${String(to.getMonth() + 1).padStart(2, "0")}-01`;
+    m.innerHTML = `<div class="spinner" style="margin:40px auto"></div>`;
+    const [od, lg, ex, em] = await Promise.all([
+      sb.from("orders").select("id,commission,delivery_fee,driver_id").eq("status", "delivered").gte("delivered_at", from.toISOString()).lt("delivered_at", to.toISOString()).limit(10000),
+      sb.from("ledger").select("amount,kind,driver_id").gte("created_at", from.toISOString()).lt("created_at", to.toISOString()).limit(10000),
+      sb.from("expenses").select("*").gte("spent_on", fromD).lt("spent_on", toD).order("spent_on", { ascending: false }),
+      sb.from("employees").select("*").order("active", { ascending: false }).order("name"),
+    ]);
+    if (ex.error) { m.innerHTML = `<div class="alert bad">${esc(ex.error.message)}</div>`; return; }
+    const orders = od.data || [], ledger = lg.data || [], exps = ex.data || [], emps = em.data || [];
+    const commission = orders.reduce((a, o) => a + Number(o.commission), 0);
+    const received = -ledger.filter((l) => l.kind === "settlement").reduce((a, l) => a + Number(l.amount), 0);
+    const salaries = exps.filter((e) => e.category === "رواتب").reduce((a, e) => a + Number(e.amount), 0);
+    const other = exps.filter((e) => e.category !== "رواتب").reduce((a, e) => a + Number(e.amount), 0);
+    const net = commission - salaries - other;
+    const debt = Object.values(S.balances || {}).reduce((a, b) => a + Number(b.debt || 0), 0);
+    const byCat = {}; exps.forEach((e) => (byCat[e.category] = (byCat[e.category] || 0) + Number(e.amount)));
+    const paid = {}; exps.filter((e) => e.employee_id).forEach((e) => (paid[e.employee_id] = (paid[e.employee_id] || 0) + Number(e.amount)));
+    const CATS = ["إيجار", "وقود", "إعلانات", "اتصالات وإنترنت", "صيانة", "مكتب ولوازم", "أخرى"];
+    const today = new Date().toISOString().slice(0, 10);
+    m.innerHTML = `
+      <div class="spread"><h2 style="margin:0">الحسابات</h2><input type="month" id="accMonth" value="${month}" style="width:auto"></div>
+      <div class="stats five" style="margin-top:12px">
+        <div class="stat"><div class="v">${money(commission)}</div><div class="l">العمولات (${orders.length} طلب)</div></div>
+        <div class="stat"><div class="v">${money(received)}</div><div class="l">استلمت من السائقين</div></div>
+        <div class="stat"><div class="v">${money(salaries)}</div><div class="l">الرواتب</div></div>
+        <div class="stat"><div class="v">${money(other)}</div><div class="l">المصاريف</div></div>
+        <div class="stat ${net >= 0 ? "good" : "badv"}"><div class="v">${money(net)}</div><div class="l">الصافي (عمولات − رواتب − مصاريف)</div></div>
+      </div>
+      <p class="small muted">ديون على السائقين هسه (ما مستلمة بعد): <b>${money(debt)}</b></p>
+      <div class="dash">
+        <section class="card">
+          <h3>المصاريف</h3>
+          <form id="expForm" class="exp-form">
+            <input type="date" name="spent_on" value="${today.startsWith(month) ? today : fromD}" required>
+            <select name="category">${CATS.map((c) => `<option>${c}</option>`).join("")}</select>
+            <input name="amount" inputmode="numeric" class="ltr" placeholder="المبلغ" required>
+            <input name="note" placeholder="ملاحظة (اختياري)">
+            <button class="btn primary">إضافة</button>
+          </form>
+          ${Object.keys(byCat).length ? `<div class="row" style="margin:10px 0">${Object.entries(byCat).sort((a, b) => b[1] - a[1]).map(([c, v]) => `<span class="chip">${esc(c)}: ${Number(v).toLocaleString("en-US")}</span>`).join("")}</div>` : ""}
+          ${exps.map((e) => `<div class="ledger-item"><div><b>${esc(e.category)}</b>${e.employee_id ? ` · ${esc(emps.find((x) => x.id === e.employee_id)?.name || "")}` : ""}${e.note ? ` · ${esc(e.note)}` : ""}<div class="small muted">${esc(e.spent_on)}</div></div>
+            <div class="row" style="flex-wrap:nowrap"><b>${money(e.amount)}</b><button class="btn sm ghost" data-act="delExp" data-id="${e.id}" title="حذف">✕</button></div></div>`).join("") || `<div class="empty">ماكو مصاريف بهذا الشهر</div>`}
+        </section>
+        <section class="card">
+          <h3>الموظفين والرواتب</h3>
+          ${emps.map((e) => { const p = paid[e.id] || 0, left = Math.max(0, Number(e.monthly_salary) - p);
+            return `<div class="ledger-item" style="align-items:center"><div><b>${esc(e.name)}</b>${e.job ? ` · ${esc(e.job)}` : ""}${!e.active ? ` <span class="chip st-cancelled">متوقف</span>` : ""}
+              <div class="small muted">الراتب ${money(e.monthly_salary)} · انصرف ${money(p)}${left ? ` · باقي <b style="color:var(--warn)">${Number(left).toLocaleString("en-US")}</b>` : " ✓"}</div></div>
+              <div class="row" style="flex-wrap:nowrap">${e.active ? `<button class="btn sm ok" data-act="paySalary" data-id="${e.id}" data-left="${left}">صرف راتب</button>` : ""}
+              <button class="btn sm ghost" data-act="toggleEmp" data-id="${e.id}">${e.active ? "إيقاف" : "تفعيل"}</button></div></div>`; }).join("") || `<div class="empty">ماكو موظفين بعد</div>`}
+          <div class="hr"></div>
+          <form id="empForm" class="exp-form">
+            <input name="name" placeholder="اسم الموظف" required>
+            <input name="job" placeholder="الوظيفة (محاسب، موزع...)">
+            <input name="monthly_salary" inputmode="numeric" class="ltr" placeholder="الراتب الشهري" required>
+            <button class="btn dark">إضافة موظف</button>
+          </form>
+        </section>
+      </div>`;
+    $("#accMonth").onchange = (e) => { S.accMonth = e.target.value || month; this.renderAccounts(); };
+    $("#expForm").onsubmit = async (e) => {
+      e.preventDefault(); const f = e.target;
+      const { error } = await sb.from("expenses").insert({ spent_on: f.spent_on.value, category: f.category.value, amount: toNum(f.amount.value), note: f.note.value || null });
+      if (error) return toast(errMsg(error), true);
+      toast("انضاف المصروف"); this.renderAccounts();
+    };
+    $("#empForm").onsubmit = async (e) => {
+      e.preventDefault(); const f = e.target;
+      const { error } = await sb.from("employees").insert({ name: f.name.value.trim(), job: f.job.value || null, monthly_salary: toNum(f.monthly_salary.value) });
+      if (error) return toast(errMsg(error), true);
+      toast("انضاف الموظف"); this.renderAccounts();
+    };
+  },
   // ----- settings -----
   renderSettings() {
     const s = S.settings || {};
@@ -1039,6 +1149,8 @@ const Admin = {
       <div class="field"><label>اسم التطبيق</label><input name="app_name" value="${esc(s.app_name)}" required></div>
       <div class="field"><label>رابط اللوگو (صورة مربعة)</label><input name="logo_url" class="ltr" value="${esc(s.logo_url || "")}" placeholder="https://..."></div>
       <div class="field"><label>اللون الرئيسي</label><div class="row" style="flex-wrap:nowrap"><input type="color" name="primary_color" value="${esc(s.primary_color)}" style="width:64px;padding:4px;height:48px"><span class="small muted">يتغير عند الكل مباشرة</span></div></div>
+      <div class="field"><label>الخط</label><select name="font_family">${Object.keys(FONTS).map((f) => `<option value="${f}" ${(s.font_family || "IBM Plex Sans Arabic") === f ? "selected" : ""}>${f}</option>`).join("")}</select>
+        <div id="fontPreview" class="card" style="margin-top:8px;font-size:18px;box-shadow:none">جايك بالطريق — طلب جديد #125 · ربحك 2,500 د.ع</div></div>
       <div class="field"><label>رقم الدعم</label><input name="support_phone" type="tel" value="${esc(s.support_phone || "")}"></div>
       <div class="section-title">العمولة والديون</div>
       <div class="field"><label>نوع العمولة</label><select name="commission_type">
@@ -1056,10 +1168,12 @@ const Admin = {
     const f = $("#setForm");
     const lbl = () => ($("#commLbl").textContent = f.commission_type.value === "percent" ? "النسبة % من أجرة التوصيل" : "مبلغ العمولة (د.ع) على كل طلب");
     f.commission_type.onchange = lbl; lbl();
+    const prev = () => { loadFont(f.font_family.value); $("#fontPreview").style.fontFamily = `"${f.font_family.value}"`; };
+    f.font_family.onchange = prev; prev();
     f.onsubmit = async (e) => {
       e.preventDefault();
       const v = {
-        app_name: f.app_name.value.trim(), logo_url: f.logo_url.value.trim() || null, primary_color: f.primary_color.value,
+        app_name: f.app_name.value.trim(), font_family: f.font_family.value, logo_url: f.logo_url.value.trim() || null, primary_color: f.primary_color.value,
         support_phone: f.support_phone.value.trim() || null, commission_type: f.commission_type.value,
         commission_value: toNum(f.commission_value.value), debt_cap: toNum(f.debt_cap.value),
         offer_timeout_sec: Math.max(10, toNum(f.offer_timeout_sec.value) || 30),
@@ -1101,6 +1215,15 @@ const Admin = {
         const z = S.zones.find((x) => String(x.id) === id);
         const { error } = await sb.from("zones").update({ active: !z.active }).eq("id", id); if (error) throw error;
         $("#amain").dataset.view = ""; await this.load();
+      }
+      if (act === "delExp") { if (!confirm("تحذف هذا المصروف؟")) return; const { error } = await sb.from("expenses").delete().eq("id", id); if (error) throw error; toast("انحذف"); this.renderAccounts(); }
+      if (act === "toggleEmp") { const { data: e } = await sb.from("employees").select("active").eq("id", id).single(); await sb.from("employees").update({ active: !e.active }).eq("id", id); this.renderAccounts(); }
+      if (act === "paySalary") {
+        const amt = prompt("مبلغ الراتب المصروف:", b.dataset.left || ""); if (!amt) return;
+        const month = S.accMonth || new Date().toISOString().slice(0, 7);
+        const today = new Date().toISOString().slice(0, 10);
+        const { error } = await sb.from("expenses").insert({ category: "رواتب", amount: toNum(amt), employee_id: Number(id), salary_month: `${month}-01`, spent_on: today.startsWith(month) ? today : `${month}-01`, note: `راتب ${month}` });
+        if (error) throw error; toast("انسجل الراتب"); this.renderAccounts();
       }
       if (act === "unflag") { await sb.from("flagged_phones").delete().eq("phone", b.dataset.phone); this.renderFlagged(); }
     } catch (err) { toast(errMsg(err), true); }
