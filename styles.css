@@ -367,3 +367,6 @@ tr.voided-soft td { color: var(--ink-2); }
 .doc-card .btn { margin: 4px 10px 10px; }
 .doc-n { font-weight: 400; }
 @media (max-width: 480px) { .veh-grid { grid-template-columns: 1fr; } }
+.pd-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.pd-item { display: flex; justify-content: space-between; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px; }
+#plateRow[hidden], #noPlateNote[hidden], .veh-grid [hidden] { display: none !important; }

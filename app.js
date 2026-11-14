@@ -247,11 +247,43 @@ const driverIcon = (d, busy) => L.divIcon({ className: "", html: `<div class="dr
 const VEH = { motorcycle: { label: "دراجة", icon: "🛵" }, car: { label: "سيارة", icon: "🚗" } };
 const VEH_FIELDS = [["make_model", "النوع والموديل", "مثلاً: كيا ريو / هوندا 150"], ["color", "اللون", "مثلاً: أبيض"], ["year", "سنة الصنع", "مثلاً: 2018"], ["plate", "رقم اللوحة", "مثلاً: 12345 أ"], ["plate_city", "محافظة اللوحة", "مثلاً: بابل"]];
 const DOC_TYPES = ["البطاقة الوطنية", "إجازة السوق", "سنوية المركبة", "بطاقة السكن", "صورة شخصية", "كفالة / تعهد", "أخرى"];
-const vehSummary = (t, v) => [VEH[t]?.icon + " " + VEH[t]?.label, v?.make_model, v?.color, v?.year, v?.plate && `لوحة ${v.plate}${v.plate_city ? " " + v.plate_city : ""}`].filter(Boolean).join(" · ");
-const vehFormHtml = (t, v = {}) => `<div class="field"><label>نوع المركبة</label><div class="seg seg-wide" id="vehSeg">${Object.entries(VEH).map(([k, x]) => `<button type="button" class="${k === (t || "motorcycle") ? "on" : ""}" data-veh="${k}">${x.icon} ${x.label}</button>`).join("")}</div><input type="hidden" name="vehicle_type" value="${t || "motorcycle"}"></div>
-  <div class="veh-grid">${VEH_FIELDS.map(([k, l, ph]) => `<div class="field"><label>${l}</label><input name="v_${k}" required value="${esc(v[k] || "")}" placeholder="${ph}" ${k === "year" ? 'inputmode="numeric" maxlength="4"' : ""}></div>`).join("")}</div>`;
-const bindVehSeg = (bg) => { const vs = $("#vehSeg", bg); if (vs) vs.onclick = (e) => { const t = e.target.closest("[data-veh]"); if (!t) return; vs.querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === t)); vs.parentElement.querySelector("[name=vehicle_type]").value = t.dataset.veh; }; };
-const readVeh = (f) => { const v = {}; VEH_FIELDS.forEach(([k]) => (v[k] = String(f["v_" + k] || "").trim())); return v; };
+const vehSummary = (t, v) => [VEH[t]?.icon + " " + VEH[t]?.label, v?.make_model, v?.color, v?.year, v?.has_plate === false ? "بدون رقم" : v?.plate && `لوحة ${v.plate}${v.plate_city ? " " + v.plate_city : ""}`].filter(Boolean).join(" · ");
+const PLATE_KEYS = ["plate", "plate_city"];
+// motorcycle without plate: vehicle details optional; otherwise everything required
+const vehMissing = (t, v) => { const noPlate = t === "motorcycle" && v.has_plate === false; return noPlate ? null : VEH_FIELDS.find(([k]) => !v[k]); };
+const vehFormHtml = (t, v = {}) => { t = t || "motorcycle"; const hp = v.has_plate !== false;
+  return `<div class="field"><label>نوع المركبة</label><div class="seg seg-wide" id="vehSeg">${Object.entries(VEH).map(([k, x]) => `<button type="button" class="${k === t ? "on" : ""}" data-veh="${k}">${x.icon} ${x.label}</button>`).join("")}</div><input type="hidden" name="vehicle_type" value="${t}"></div>
+  <div class="field" id="plateRow" ${t === "motorcycle" ? "" : "hidden"}><label>الدراجة بيها رقم؟</label><div class="seg seg-wide" id="plateSeg"><button type="button" class="${hp ? "on" : ""}" data-hp="1">🔢 بيها رقم</button><button type="button" class="${hp ? "" : "on"}" data-hp="0">بدون رقم</button></div><input type="hidden" name="has_plate" value="${hp ? "1" : "0"}"></div>
+  <div class="alert info small" id="noPlateNote" ${t === "motorcycle" && !hp ? "" : "hidden"}>بدون رقم: معلومات الدراجة اختيارية، بس <b>مستمسكات السائق ضرورية</b>.</div>
+  <div class="veh-grid">${VEH_FIELDS.map(([k, l, ph]) => `<div class="field" ${PLATE_KEYS.includes(k) ? 'data-plate' : ""} ${PLATE_KEYS.includes(k) && t === "motorcycle" && !hp ? "hidden" : ""}><label>${l}</label><input name="v_${k}" value="${esc(v[k] || "")}" placeholder="${ph}" ${k === "year" ? 'inputmode="numeric" maxlength="4"' : ""}></div>`).join("")}</div>`; };
+const bindVehSeg = (bg) => {
+  const vs = $("#vehSeg", bg), ps = $("#plateSeg", bg); if (!vs) return;
+  const sync = () => {
+    const t = $("[name=vehicle_type]", bg).value, hp = $("[name=has_plate]", bg).value === "1", noPlate = t === "motorcycle" && !hp;
+    $("#plateRow", bg).hidden = t !== "motorcycle";
+    $("#noPlateNote", bg).hidden = !noPlate;
+    bg.querySelectorAll("[data-plate]").forEach((el) => (el.hidden = noPlate));
+  };
+  vs.onclick = (e) => { const t = e.target.closest("[data-veh]"); if (!t) return; vs.querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === t)); $("[name=vehicle_type]", bg).value = t.dataset.veh; sync(); };
+  ps.onclick = (e) => { const t = e.target.closest("[data-hp]"); if (!t) return; ps.querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === t)); $("[name=has_plate]", bg).value = t.dataset.hp; sync(); };
+};
+const readVeh = (f) => { const v = {}; VEH_FIELDS.forEach(([k]) => (v[k] = String(f["v_" + k] || "").trim()));
+  v.has_plate = f.vehicle_type === "car" || f.has_plate === "1";
+  if (!v.has_plate) PLATE_KEYS.forEach((k) => (v[k] = ""));
+  return v; };
+async function uploadDriverDoc(id, file, dtype) {
+  if (file.size > 10485760) throw new Error(`${file.name} أكبر من 10MB`);
+  const ext = (file.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 5) || "jpg";
+  const path = `${id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  const up = await sb.storage.from("driver-docs").upload(path, file, { contentType: file.type || undefined });
+  if (up.error) throw up.error;
+  const { error } = await sb.from("driver_documents").insert({ driver_id: id, doc_type: dtype, file_path: path, file_name: file.name.slice(0, 120), mime: file.type || null });
+  if (error) { await sb.storage.from("driver-docs").remove([path]); throw error; }
+}
+const docPickerHtml = () => `<div class="field"><label>مستمسكات السائق (ضرورية)</label>
+  <div class="cat-chips" id="pdType">${DOC_TYPES.map((t, i) => `<button type="button" class="chip-btn ${i === 0 ? "on" : ""}" data-dt="${esc(t)}">${esc(t)}</button>`).join("")}</div>
+  <label class="btn block" style="margin-top:8px">📷 أضف صورة أو PDF<input type="file" id="pdFile" accept="image/*,application/pdf" multiple hidden></label>
+  <div id="pdList" class="pd-list"></div></div>`;
 const BIZ = { restaurant: { label: "المطعم", icon: "🍽" }, shop: { label: "المحل", icon: "🏪" }, page: { label: "البيج", icon: "📱" } };
 const bizInfo = (k) => BIZ[k] || (k ? { label: k, icon: "🏷" } : BIZ.restaurant);
 const bizLabel = (r) => { const b = bizInfo(r?.biz_type); return `${b.icon} ${b.label.replace(/^ال/, "")}`; };
@@ -1188,7 +1220,7 @@ const Admin = {
       $("#vehForm", bg).onsubmit = async (e) => {
         e.preventDefault();
         const f = Object.fromEntries(new FormData(e.target)); const v = readVeh(f);
-        const miss = VEH_FIELDS.find(([k]) => !v[k]); if (miss) return toast("اكمل: " + miss[1], true);
+        const miss = vehMissing(f.vehicle_type, v); if (miss) return toast("اكمل: " + miss[1], true);
         const upd = { vehicle_type: f.vehicle_type, vehicle_info: v, vehicle: vehSummary(f.vehicle_type, v) };
         const { error } = await sb.from("profiles").update(upd).eq("id", id);
         if (error) return toast(errMsg(error), true);
@@ -1202,14 +1234,8 @@ const Admin = {
         const files = [...e.target.files]; e.target.value = ""; if (!files.length) return;
         const msg = $("#docMsg", bg);
         for (const [i, file] of files.entries()) {
-          if (file.size > 10485760) { toast(`${file.name} أكبر من 10MB`, true); continue; }
           msg.textContent = `جاري رفع ${i + 1} من ${files.length}...`;
-          const ext = (file.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 5) || "jpg";
-          const path = `${id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-          const up = await sb.storage.from("driver-docs").upload(path, file, { contentType: file.type || undefined });
-          if (up.error) { toast(errMsg(up.error), true); continue; }
-          const { error } = await sb.from("driver_documents").insert({ driver_id: id, doc_type: dtype, file_path: path, file_name: file.name.slice(0, 120), mime: file.type || null });
-          if (error) { await sb.storage.from("driver-docs").remove([path]); toast(errMsg(error), true); }
+          try { await uploadDriverDoc(id, file, dtype); } catch (err) { toast(errMsg(err), true); }
         }
         msg.textContent = "✓ انرفع"; this.loadDocs(id, bg);
       };
@@ -2011,10 +2037,18 @@ const Admin = {
           <div class="field"><label>المنطقة</label><input name="zone_name" list="zoneDl" placeholder="اكتب اسم المنطقة..." autocomplete="off"><datalist id="zoneDl">${S.zones.map((z) => `<option value="${esc(z.name)}">`).join("")}</datalist>
             <div class="small muted" id="zoneHint" style="margin-top:4px"></div></div>
           <div class="field" id="zoneFeeF" hidden><label>أجرة التوصيل للمنطقة الجديدة (د.ع)</label><input name="zone_fee" inputmode="numeric" class="ltr" placeholder="مثلاً 3000"></div>`
-        : vehFormHtml("motorcycle")}
+        : vehFormHtml("motorcycle") + docPickerHtml()}
         <div class="row" style="flex-wrap:nowrap"><button class="btn primary" style="flex:1">إنشاء الحساب</button><button type="button" class="btn ghost" data-close>إلغاء</button></div>
       </form>`, (bg, close) => {
       bindVehSeg(bg);
+      const pending = []; let pdType = DOC_TYPES[0];
+      const pdRender = () => { $("#pdList", bg).innerHTML = pending.map((x, i) => `<div class="pd-item"><span>📎 <b>${esc(x.type)}</b> · <span class="small muted">${esc(x.file.name)}</span></span><button type="button" class="btn sm ghost" data-pdrm="${i}">✕</button></div>`).join("") || `<div class="small muted">ما مضاف شي بعد. اختار النوع وأضف الصورة.</div>`; };
+      if ($("#pdType", bg)) {
+        pdRender();
+        $("#pdType", bg).onclick = (e) => { const t = e.target.closest("[data-dt]"); if (!t) return; pdType = t.dataset.dt; $("#pdType", bg).querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === t)); };
+        $("#pdFile", bg).onchange = (e) => { [...e.target.files].forEach((file) => file.size > 10485760 ? toast(`${file.name} أكبر من 10MB`, true) : pending.push({ file, type: pdType })); e.target.value = ""; pdRender(); };
+        $("#pdList", bg).onclick = (e) => { const b = e.target.closest("[data-pdrm]"); if (b) { pending.splice(Number(b.dataset.pdrm), 1); pdRender(); } };
+      }
       const bs = $("#bizSeg", bg);
       const bn = $("#bizNew", bg);
       if (bs) bs.onclick = (e) => {
@@ -2037,7 +2071,7 @@ const Admin = {
       };
       $("#uForm", bg).onsubmit = async (e) => {
         e.preventDefault();
-        const f = Object.fromEntries(new FormData(e.target)); const btn = e.target.querySelector("button"); btn.disabled = true;
+        const f = Object.fromEntries(new FormData(e.target)); const btn = e.target.querySelector("button:not([type=button])"); btn.disabled = true;
         try {
           let zone_id = null;
           const zn = String(f.zone_name || "").trim();
@@ -2055,17 +2089,24 @@ const Admin = {
           delete f.zone_name; delete f.zone_fee; delete f.biz_new;
           if (!isR) {
             const v = readVeh(f);
-            const miss = VEH_FIELDS.find(([k]) => !v[k]); if (miss) throw new Error("اكمل معلومات المركبة: " + miss[1]);
-            Object.keys(f).filter((k) => k.startsWith("v_")).forEach((k) => delete f[k]);
+            const miss = vehMissing(f.vehicle_type, v); if (miss) throw new Error("اكمل معلومات المركبة: " + miss[1]);
+            if (!pending.length) throw new Error("لازم تضيف مستمسكات السائق (على الأقل البطاقة الوطنية)");
+            Object.keys(f).filter((k) => k.startsWith("v_")).forEach((k) => delete f[k]); delete f.has_plate;
             f.vehicle_info = v; f.vehicle = vehSummary(f.vehicle_type, v);
           }
           if (isR && !String(f.biz_type || "").trim()) throw new Error("اكتب النوع الجديد");
           const res = await adminUsers({ action: "create", role, ...f, zone_id });
+          let upFail = 0;
+          if (!isR && res?.id) {
+            btn.textContent = "جاري رفع المستمسكات...";
+            for (const x of pending) { try { await uploadDriverDoc(res.id, x.file, x.type); } catch (_) { upFail++; } }
+            if (upFail) toast(`انسجل الحساب بس ${upFail} مستمسك ما انرفع، ارفعه من زر الملف`, true);
+          }
           close();
           const link = location.origin + location.pathname;
           modal(`<h3>تم ✓</h3><p>دز هذي المعلومات لـ ${esc(f.name)}:</p>
             <div class="card" style="user-select:all;white-space:pre-line">الرابط: ${esc(link)}\nالرقم: ${esc(normPhone(f.phone))}\nالرمز: ${esc(f.password)}</div>
-            <div class="row" style="margin-top:12px"><a class="btn ok" target="_blank" rel="noopener" href="https://wa.me/964${normPhone(f.phone).slice(1)}?text=${encodeURIComponent(`هلا ${f.name}، حسابك على ${S.settings.app_name} جاهز.\nالرابط: ${link}\nالرقم: ${normPhone(f.phone)}\nالرمز: ${f.password}`)}">إرسال واتساب</a>${!isR && res?.id ? `<button class="btn primary" data-close data-act="driverFile" data-id="${res.id}">📁 ارفع مستمسكاته</button>` : ""}<button class="btn" data-close>سد</button></div>`, (b2) => { const fb = b2.querySelector("[data-act=driverFile]"); if (fb) fb.onclick = () => setTimeout(() => this.driverFile(res.id), 50); });
+            <div class="row" style="margin-top:12px"><a class="btn ok" target="_blank" rel="noopener" href="https://wa.me/964${normPhone(f.phone).slice(1)}?text=${encodeURIComponent(`هلا ${f.name}، حسابك على ${S.settings.app_name} جاهز.\nالرابط: ${link}\nالرقم: ${normPhone(f.phone)}\nالرمز: ${f.password}`)}">إرسال واتساب</a>${!isR && res?.id ? `<button class="btn primary" data-close data-act="driverFile" data-id="${res.id}">📁 ملف السائق</button>` : ""}<button class="btn" data-close>سد</button></div>`, (b2) => { const fb = b2.querySelector("[data-act=driverFile]"); if (fb) fb.onclick = () => setTimeout(() => this.driverFile(res.id), 50); });
           this.load();
         } catch (err) { toast(errMsg(err), true); btn.disabled = false; }
       };
