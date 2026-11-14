@@ -1285,6 +1285,11 @@ const Admin = {
 
 // ---------- go ----------
 sb.auth.onAuthStateChange((ev) => { if (ev === "SIGNED_OUT" && S.profile) { S.profile = null; boot(); } });
-if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+if ("serviceWorker" in navigator) {
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).then((r) => { r.update(); setInterval(() => r.update(), 5 * 60000); }).catch(() => {});
+  // a new version took over: reload once so everyone runs the latest app
+  navigator.serviceWorker.addEventListener("controllerchange", () => { if (hadController && !window.__reloaded) { window.__reloaded = true; location.reload(); } });
+}
 boot().catch((e) => { app().innerHTML = `<div class="login"><div class="card"><div class="alert bad">${esc(errMsg(e))}</div><button class="btn block" style="margin-top:12px" onclick="location.reload()">حاول مرة ثانية</button></div></div>`; });
 })();
