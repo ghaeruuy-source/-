@@ -210,11 +210,13 @@ function loadFont(f) {
   l.href = `https://fonts.googleapis.com/css2?family=${f.replace(/ /g, "+")}:wght@${FONTS[f]}&display=swap`;
   document.head.appendChild(l);
 }
+try { const cf = localStorage.getItem("jayek_font"); if (cf && FONTS[cf]) { loadFont(cf); document.documentElement.style.setProperty("--font", `"${cf}"`); } } catch (_) {}
 function applyBranding() {
   const s = S.settings || {};
   const font = FONTS[s.font_family] ? s.font_family : "IBM Plex Sans Arabic";
   loadFont(font);
   document.documentElement.style.setProperty("--font", `"${font}"`);
+  try { localStorage.setItem("jayek_font", font); } catch (_) {}
   const color = s.primary_color || "#E8590C";
   document.documentElement.style.setProperty("--brand", color);
   document.querySelector('meta[name="theme-color"]').setAttribute("content", color);
@@ -809,6 +811,7 @@ const Admin = {
         if (x.role === "driver") { S.drivers[x.id] = x; this.updateMap(); if (S.tab === "drivers") this.render(); }
       })
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "ledger" }, () => this.load())
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "settings" }, (p) => { S.settings = p.new; applyBranding(); })
       .subscribe();
   },
   render(soft = false) {
@@ -1461,7 +1464,16 @@ const Admin = {
     const lbl = () => ($("#commLbl").textContent = f.commission_type.value === "percent" ? "النسبة % من أجرة التوصيل" : "مبلغ العمولة (د.ع) على كل طلب");
     f.commission_type.onchange = lbl; lbl();
     const prev = () => { loadFont(f.font_family.value); $("#fontPreview").style.fontFamily = `"${f.font_family.value}"`; };
-    f.font_family.onchange = prev; prev();
+    prev();
+    // font applies + saves right away, no need to scroll to "حفظ"
+    f.font_family.onchange = async () => {
+      prev();
+      const font = f.font_family.value;
+      S.settings = { ...S.settings, font_family: font }; applyBranding();
+      const { error } = await sb.from("settings").update({ font_family: font, updated_at: new Date().toISOString() }).eq("id", 1);
+      if (error) return toast("ما انحفظ الخط: " + error.message, true);
+      toast("تغيّر الخط إلى " + font);
+    };
     f.onsubmit = async (e) => {
       e.preventDefault();
       const v = {
