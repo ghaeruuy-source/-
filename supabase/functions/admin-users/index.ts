@@ -69,7 +69,7 @@ Deno.serve(async (req) => {
         id: u.user!.id, role, name: body.name.trim(), phone,
         address: body.address || null, zone_id: body.zone_id || null,
         lat: body.lat ?? null, lng: body.lng ?? null, vehicle: body.vehicle || null, permissions,
-        biz_type: role === "restaurant" ? (["restaurant", "shop", "page"].includes(body.biz_type) ? body.biz_type : "restaurant") : null,
+        biz_type: role === "restaurant" ? (String(body.biz_type || "").trim().slice(0, 30) || "restaurant") : null,
       });
       if (e2) {
         await admin.auth.admin.deleteUser(u.user!.id);

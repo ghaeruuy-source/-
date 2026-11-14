@@ -353,3 +353,7 @@ tr.voided-soft td { color: var(--ink-2); }
 .place-gate .field { text-align: start; }
 .pg-map { height: 300px; border-radius: 12px; margin-top: 4px; }
 .bad-t { color: var(--bad, #c62828); font-weight: 600; }
+.biz-seg { display: flex; flex-wrap: wrap; gap: 6px; }
+.biz-seg .chip-btn.on { background: var(--brand); color: #fff; border-color: var(--brand); }
+.biz-seg .chip-btn.add { border-style: dashed; }
+#bizNew[hidden] { display: none !important; }

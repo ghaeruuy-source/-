@@ -245,7 +245,9 @@ function makeMap(el, zoom = 13) {
 }
 const driverIcon = (d, busy) => L.divIcon({ className: "", html: `<div class="drv-pin ${!d.online ? "off" : busy ? "busy" : ""}">${esc((d.name || "س").trim()[0])}</div>`, iconSize: [30, 30], iconAnchor: [15, 15] });
 const BIZ = { restaurant: { label: "المطعم", icon: "🍽" }, shop: { label: "المحل", icon: "🏪" }, page: { label: "البيج", icon: "📱" } };
-const bizLabel = (r) => { const b = BIZ[r?.biz_type] || BIZ.restaurant; return `${b.icon} ${b.label.replace(/^ال/, "")}`; };
+const bizInfo = (k) => BIZ[k] || (k ? { label: k, icon: "🏷" } : BIZ.restaurant);
+const bizLabel = (r) => { const b = bizInfo(r?.biz_type); return `${b.icon} ${b.label.replace(/^ال/, "")}`; };
+const bizTypes = () => [...Object.keys(BIZ), ...new Set((S.people || []).map((p) => p.biz_type).filter((k) => k && !BIZ[k]))];
 const restIcon = () => L.divIcon({ className: "", html: `<div class="rest-pin">🍽</div>`, iconSize: [26, 26], iconAnchor: [13, 13] });
 const DCOLORS = ["#E8590C", "#1971C2", "#2F9E44", "#AE3EC9", "#E03131", "#0C8599", "#F08C00", "#5F3DC4", "#C2255C", "#5C940D", "#364FC7", "#862E9C"];
 function driverColor(id) {
@@ -1918,9 +1920,10 @@ const Admin = {
   },
   addUserModal(role) {
     const isR = role === "restaurant";
-    modal(`<h3>${isR ? "حساب جديد (مطعم / محل / بيج)" : "سائق جديد"}</h3>
+    modal(`<h3>${isR ? "حساب جديد" : "سائق جديد"}</h3>
       <form id="uForm" autocomplete="off">
-        ${isR ? `<div class="field"><label>النوع</label><div class="seg seg-wide" id="bizSeg">${Object.entries(BIZ).map(([k, v], i) => `<button type="button" class="${i === 0 ? "on" : ""}" data-biz="${k}">${v.icon} ${v.label}</button>`).join("")}</div><input type="hidden" name="biz_type" value="restaurant"></div>` : ""}
+        ${isR ? `<div class="field"><label>النوع</label><div class="biz-seg" id="bizSeg">${bizTypes().map((k, i) => { const v = bizInfo(k); return `<button type="button" class="chip-btn ${i === 0 ? "on" : ""}" data-biz="${esc(k)}">${v.icon} ${esc(v.label.replace(/^ال/, ""))}</button>`; }).join("")}<button type="button" class="chip-btn add" data-biz-new>+ نوع آخر</button></div>
+          <input name="biz_new" id="bizNew" maxlength="30" placeholder="اكتب النوع، مثلاً: صيدلية، أفران، ملابس..." hidden style="margin-top:8px"><input type="hidden" name="biz_type" value="restaurant"></div>` : ""}
         <div class="field"><label id="nameLbl">${isR ? "اسم المطعم" : "اسم السائق"}</label><input name="name" required autocomplete="off"></div>
         <div class="field"><label>رقم الموبايل (يستعمله للدخول)</label><input name="phone" type="tel" inputmode="tel" required></div>
         <div class="field"><label>الرمز (6 أحرف أو أكثر)</label><input name="password" class="ltr" required minlength="6" value="${Math.random().toString().slice(2, 8)}"></div>
@@ -1932,12 +1935,18 @@ const Admin = {
         <div class="row" style="flex-wrap:nowrap"><button class="btn primary" style="flex:1">إنشاء الحساب</button><button type="button" class="btn ghost" data-close>إلغاء</button></div>
       </form>`, (bg, close) => {
       const bs = $("#bizSeg", bg);
+      const bn = $("#bizNew", bg);
       if (bs) bs.onclick = (e) => {
-        const t = e.target.closest("[data-biz]"); if (!t) return;
+        const t = e.target.closest("[data-biz],[data-biz-new]"); if (!t) return;
         bs.querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === t));
+        const isNew = t.hasAttribute("data-biz-new");
+        bn.hidden = !isNew;
+        if (isNew) { $("#uForm [name=biz_type]", bg).value = ""; $("#nameLbl", bg).textContent = "الاسم"; bn.focus(); return; }
         $("#uForm [name=biz_type]", bg).value = t.dataset.biz;
-        $("#nameLbl", bg).textContent = "اسم " + BIZ[t.dataset.biz].label;
+        const l = bizInfo(t.dataset.biz).label;
+        $("#nameLbl", bg).textContent = "اسم " + (BIZ[t.dataset.biz] ? l : "ال" + l);
       };
+      if (bn) bn.oninput = () => { $("#uForm [name=biz_type]", bg).value = bn.value.trim(); };
       const findZone = (n) => S.zones.find((z) => z.name.trim() === String(n || "").trim());
       const zi = $("#uForm [name=zone_name]", bg);
       if (zi) zi.oninput = () => {
@@ -1962,7 +1971,8 @@ const Admin = {
               S.zones.push(nz); zone_id = nz.id;
             }
           }
-          delete f.zone_name; delete f.zone_fee;
+          delete f.zone_name; delete f.zone_fee; delete f.biz_new;
+          if (isR && !String(f.biz_type || "").trim()) throw new Error("اكتب النوع الجديد");
           await adminUsers({ action: "create", role, ...f, zone_id });
           close();
           const link = location.origin + location.pathname;
