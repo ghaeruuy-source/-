@@ -1518,6 +1518,7 @@ const Admin = {
       }
       if (act === "addUser") return this.addUserModal(b.dataset.role);
       if (act === "permUser") return this.permModal(id || null);
+      if (act === "stmClear") { S.stm.id = ""; return this.renderStatement(); }
       if (act === "stmt") { S.stm = { ...(S.stm || {}), type: b.dataset.type, id }; S.tab = "statement"; return this.render(); }
       if (act === "settle") return this.voucherModal("receive", { party_type: "driver", party_id: id, amount: Math.max(0, Number(S.balances?.[id]?.debt || 0)) || "" });
       if (act === "ledger") return this.ledgerModal(id);
@@ -1675,45 +1676,54 @@ const Admin = {
     const m = $("#amain");
     const today = new Date(Date.now() + 3 * 3600e3).toISOString().slice(0, 10);
     S.stm ||= {};
-    S.stm.type ||= "driver"; S.stm.from ||= today.slice(0, 8) + "01"; S.stm.to ||= today;
-    const list = S.people.filter((p) => p.role === S.stm.type).sort((a, b) => a.name.localeCompare(b.name, "ar"));
-    if (!list.find((p) => p.id === S.stm.id)) S.stm.id = list[0]?.id || "";
-    const who = list.find((p) => p.id === S.stm.id);
+    S.stm.from ||= today.slice(0, 8) + "01"; S.stm.to ||= today;
+    const pool = S.people.filter((p) => ["driver", "restaurant"].includes(p.role)).sort((x, y) => x.role.localeCompare(y.role) || x.name.localeCompare(y.name, "ar"));
+    const who = pool.find((p) => p.id === S.stm.id);
+    if (who) S.stm.type = who.role;
+    const RL = { driver: "🛵 سائق", restaurant: "🍽 مطعم" };
+    const item = (p) => `<button class="stm-opt" data-pick="${p.id}"><span class="stm-ic">${p.role === "driver" ? "🛵" : "🍽"}</span><span class="stm-nm"><b>${esc(p.name)}</b><small class="num">${esc(p.phone || "")}</small></span><span class="chip">${p.role === "driver" ? "سائق" : "مطعم"}</span></button>`;
+    const d = (n) => { const x = new Date(today + "T12:00:00Z"); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
+    const lm = new Date(today.slice(0, 8) + "01T12:00:00Z"); lm.setUTCMonth(lm.getUTCMonth() - 1);
+    const lmTo = new Date(today.slice(0, 8) + "01T12:00:00Z"); lmTo.setUTCDate(0);
+    const presets = [["اليوم", today, today], ["آخر 7 أيام", d(-6), today], ["هذا الشهر", today.slice(0, 8) + "01", today], ["الشهر الماضي", lm.toISOString().slice(0, 10), lmTo.toISOString().slice(0, 10)]];
     m.innerHTML = `
-      <div class="card no-print stm-bar">
-        <div class="seg"><button class="${S.stm.type === "driver" ? "on" : ""}" data-st="driver">🛵 سائق</button><button class="${S.stm.type === "restaurant" ? "on" : ""}" data-st="restaurant">🍽 مطعم</button></div>
-        <input id="sFind" type="search" list="sAll" placeholder="🔍 ابحث باسم سائق أو مطعم أو رقمه" style="flex:1;min-width:200px" autocomplete="off">
-        <datalist id="sAll">${S.people.filter((p) => ["driver", "restaurant"].includes(p.role)).map((p) => `<option value="${esc(p.name)} · ${p.role === "driver" ? "سائق" : "مطعم"}">${esc(p.phone || "")}</option>`).join("")}</datalist>
-        <select id="sWho" style="flex:1;min-width:160px">${list.map((p) => `<option value="${p.id}" ${p.id === S.stm.id ? "selected" : ""}>${esc(p.name)}</option>`).join("") || `<option value="">ماكو</option>`}</select>
-        <span class="row date-range"><input type="date" id="sFrom" value="${S.stm.from}" style="width:auto"> إلى <input type="date" id="sTo" value="${S.stm.to}" style="width:auto"></span>
-        <button class="btn sm" onclick="window.print()">🖨 طباعة</button>
+      <div class="card no-print stm-search">
+        <div class="stm-box"><span class="stm-glass">🔍</span><input id="sFind" type="search" placeholder="ابحث باسم السائق أو المطعم أو رقم الموبايل…" autocomplete="off" value="">
+          <div class="stm-sug" id="sSug" hidden></div></div>
+        ${who ? `<div class="stm-period">
+          <div class="row">${presets.map(([l, f, t]) => `<button class="btn sm ${S.stm.from === f && S.stm.to === t ? "dark" : "ghost"}" data-pf="${f}" data-pt="${t}">${l}</button>`).join("")}</div>
+          <span class="row date-range"><input type="date" id="sFrom" value="${S.stm.from}" style="width:auto"> إلى <input type="date" id="sTo" value="${S.stm.to}" style="width:auto"></span>
+          <button class="btn sm primary" onclick="window.print()">🖨 طباعة</button></div>` : ""}
       </div>
-      <div id="stmBody"><div class="spinner" style="margin:40px auto"></div></div>`;
-    m.querySelectorAll("[data-st]").forEach((b) => (b.onclick = () => { S.stm.type = b.dataset.st; S.stm.id = ""; this.renderStatement(); }));
-    $("#sWho").onchange = (e) => { S.stm.id = e.target.value; this.renderStatement(); };
-    $("#sFind").oninput = (e) => {
-      const q = e.target.value.trim().replace(/ · (سائق|مطعم)$/, ""); if (!q) return;
-      const pool = S.people.filter((p) => ["driver", "restaurant"].includes(p.role));
-      const hit = pool.find((p) => p.name === q || p.phone === normPhone(q))
-        || (e.inputType === "insertReplacementText" || !e.inputType ? pool.find((p) => p.name.includes(q)) : null);
-      if (hit) { S.stm.type = hit.role; S.stm.id = hit.id; this.renderStatement(); }
+      <div id="stmBody"></div>`;
+    const inp = $("#sFind"), sug = $("#sSug");
+    const show = () => {
+      const q = inp.value.trim(); const qp = q.replace(/[^0-9]/g, "");
+      const hits = pool.filter((p) => !q || p.name.includes(q) || (qp.length >= 3 && (p.phone || "").includes(qp))).slice(0, 12);
+      sug.innerHTML = hits.map(item).join("") || `<div class="empty" style="padding:14px">ما لكيت أحد بهذا الاسم</div>`;
+      sug.hidden = false;
     };
-    $("#sFind").onkeydown = (e) => {
-      if (e.key !== "Enter") return;
-      const q = e.target.value.trim().replace(/ · (سائق|مطعم)$/, "");
-      const hit = S.people.filter((p) => ["driver", "restaurant"].includes(p.role)).find((p) => p.name.includes(q) || (p.phone || "").includes(q));
-      if (hit) { S.stm.type = hit.role; S.stm.id = hit.id; this.renderStatement(); } else toast("ما لكيت أحد بهذا الاسم", true);
-    };
-    $("#sFrom").onchange = (e) => { S.stm.from = e.target.value; this.renderStatement(); };
-    $("#sTo").onchange = (e) => { S.stm.to = e.target.value; this.renderStatement(); };
+    inp.oninput = show; inp.onfocus = show;
+    inp.onkeydown = (e) => { if (e.key === "Enter") { const f = sug.querySelector("[data-pick]"); if (f) f.click(); } if (e.key === "Escape") sug.hidden = true; };
+    if (!this._stmDoc) { this._stmDoc = 1; document.addEventListener("click", (e) => { const sg = $("#sSug"); if (sg && !e.target.closest(".stm-box")) sg.hidden = true; }); }
+    const pick = (e) => { const b = e.target.closest("[data-pick]"); if (b) { S.stm.id = b.dataset.pick; this.renderStatement(); } };
+    sug.onclick = pick;
+    m.querySelectorAll("[data-pf]").forEach((b) => (b.onclick = () => { S.stm.from = b.dataset.pf; S.stm.to = b.dataset.pt; this.renderStatement(); }));
+    if ($("#sFrom")) { $("#sFrom").onchange = (e) => { S.stm.from = e.target.value; this.renderStatement(); }; $("#sTo").onchange = (e) => { S.stm.to = e.target.value; this.renderStatement(); }; }
     const body = $("#stmBody");
-    if (!who) { body.innerHTML = `<div class="empty">ماكو ${S.stm.type === "driver" ? "سواق" : "مطاعم"}</div>`; return; }
+    body.onclick = pick;
+    if (!who) {
+      const grp = (r, t) => { const l = pool.filter((p) => p.role === r); return l.length ? `<div class="section-title">${t} (${l.length})</div><div class="stm-grid">${l.map(item).join("")}</div>` : ""; };
+      body.innerHTML = pool.length ? `<p class="muted" style="margin:16px 0 0">ابحث فوك، أو اختار من القائمة:</p>${grp("driver", "السواق")}${grp("restaurant", "المطاعم")}` : `<div class="empty">ماكو سواق أو مطاعم</div>`;
+      return;
+    }
+    body.innerHTML = `<div class="spinner" style="margin:40px auto"></div>`;
     const from = `${S.stm.from}T00:00:00+03:00`;
     const toD = new Date(S.stm.to + "T12:00:00Z"); toD.setUTCDate(toD.getUTCDate() + 1);
     const to = `${toD.toISOString().slice(0, 10)}T00:00:00+03:00`;
     const n = (v) => (Number(v) ? Number(v).toLocaleString("en-US") : "");
     const head = `<div class="stm-head"><div><h2 style="margin:0">كشف حساب ${S.stm.type === "driver" ? "سائق" : "مطعم"}: ${esc(who.name)}</h2>
-      <div class="small muted">${esc(who.phone || "")} · من ${S.stm.from} إلى ${S.stm.to}</div></div><div class="print-only small">${esc(S.settings?.app_name || "")}</div></div>`;
+      <div class="small muted">${esc(who.phone || "")} · من ${S.stm.from} إلى ${S.stm.to}</div></div><button class="btn sm ghost no-print" data-act="stmClear">✕ غيّر الحساب</button><div class="print-only small">${esc(S.settings?.app_name || "")}</div></div>`;
     try {
       if (S.stm.type === "driver") {
         const [pre, rows, ords] = await Promise.all([
