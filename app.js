@@ -537,6 +537,7 @@ const Restaurant = {
     <form class="card" id="orderForm" autocomplete="off">
       <h2>طلب سائق جديد</h2>
       <div class="field"><label>المنطقة</label>
+        <input type="search" id="zoneQ" placeholder="🔍 اكتب اسم المنطقة..." autocomplete="off" style="margin-bottom:6px">
         <select name="zone" required><option value="">اختار المنطقة</option>
           ${S.zones.filter((z) => z.active).map((z) => `<option value="${z.id}">${esc(z.name)} — ${Number(z.delivery_fee).toLocaleString("en-US")} د.ع</option>`).join("")}
         </select></div>
@@ -559,6 +560,14 @@ const Restaurant = {
       box.innerHTML = `الزبون يدفع: <b>${money(t + Number(z.delivery_fee))}</b> <span class="small">(${money(t)} طلب + ${money(z.delivery_fee)} توصيل)</span>`;
     };
     f.zone.onchange = upd; f.total.oninput = upd;
+    const zq = $("#zoneQ");
+    if (zq) zq.oninput = () => {
+      const q = zq.value.trim().replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي");
+      const norm = (t) => t.replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي");
+      let first = null;
+      [...f.zone.options].forEach((o) => { if (!o.value) return; const hit = !q || norm(o.textContent).includes(q); o.hidden = !hit; if (hit && !first) first = o; });
+      if (q && first && (f.zone.selectedOptions[0]?.hidden || !f.zone.value)) { f.zone.value = first.value; upd(); }
+    };
     f.phone.onblur = async () => {
       const p = normPhone(f.phone.value); const w = $("#phoneWarn"); w.innerHTML = "";
       if (p.length < 10) return;
