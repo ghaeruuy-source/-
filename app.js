@@ -1368,17 +1368,24 @@ const Admin = {
     $("#amain").innerHTML = `<div class="card narrow" style="margin:0 auto">
       <h2>المناطق وأجور التوصيل</h2>
       <p class="small muted" style="margin-top:-6px">أجرة التوصيل ثابتة لكل منطقة. الزبون يدفعها للسائق فوق مبلغ الطلب.</p>
-      <div id="zoneList">${S.zones.map((z) => `<div class="row" style="flex-wrap:nowrap;margin-bottom:8px" data-zone="${z.id}">
+      <input id="zoneFind" placeholder="🔍 دوّر على منطقة... (${S.zones.length} منطقة)" style="margin-bottom:10px">
+      <div id="zoneList">${S.zones.map((z) => `<div class="row zrow" style="flex-wrap:nowrap;margin-bottom:8px" data-zone="${z.id}">
         <input value="${esc(z.name)}" data-f="name" style="flex:2">
         <input value="${z.delivery_fee}" data-f="fee" inputmode="numeric" style="flex:1" class="ltr">
         <button class="btn sm ${z.active ? "" : "bad"}" data-act="zoneActive" data-id="${z.id}" title="تفعيل/إيقاف">${z.active ? "فعالة" : "موقوفة"}</button>
-        <button class="btn sm dark" data-act="zoneSave" data-id="${z.id}">حفظ</button></div>`).join("") || `<div class="empty">ماكو مناطق بعد</div>`}</div>
+        <button class="btn sm dark" data-act="zoneSave" data-id="${z.id}">حفظ</button>
+        <button class="btn sm ghost danger" data-act="zoneDel" data-id="${z.id}" title="حذف المنطقة">🗑 حذف</button></div>`).join("") || `<div class="empty">ماكو مناطق بعد</div>`}</div>
       <div class="hr"></div>
       <form id="zoneAdd" class="row" style="flex-wrap:nowrap">
         <input name="name" placeholder="اسم المنطقة (مثلاً: حي بابل)" required style="flex:2">
         <input name="fee" placeholder="الأجرة" inputmode="numeric" required style="flex:1" class="ltr">
         <button class="btn primary">إضافة</button>
       </form></div>`;
+    const norm = (t) => String(t || "").replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي").replace(/\s+/g, " ").trim();
+    $("#zoneFind").oninput = (e) => {
+      const q = norm(e.target.value);
+      $("#zoneList").querySelectorAll("[data-zone]").forEach((r) => { r.style.display = !q || norm(r.querySelector('[data-f="name"]').value).includes(q) ? "" : "none"; });
+    };
     $("#zoneAdd").onsubmit = async (e) => {
       e.preventDefault();
       const { error } = await sb.from("zones").insert({ name: e.target.name.value.trim(), delivery_fee: toNum(e.target.fee.value) });
@@ -2073,6 +2080,17 @@ const Admin = {
         const row = b.closest("[data-zone]");
         const { error } = await sb.from("zones").update({ name: row.querySelector('[data-f="name"]').value.trim(), delivery_fee: toNum(row.querySelector('[data-f="fee"]').value) }).eq("id", id);
         if (error) throw error; toast("انحفظت"); $("#amain").dataset.view = ""; await this.load();
+      }
+      if (act === "zoneDel") {
+        const z = S.zones.find((x) => String(x.id) === id); if (!z) return;
+        if (!confirm(`تحذف منطقة "${z.name}"؟`)) return;
+        const { error } = await sb.from("zones").delete().eq("id", id);
+        if (error) {
+          if (error.code !== "23503") throw error;
+          const r = await sb.from("zones").update({ active: false }).eq("id", id); if (r.error) throw r.error;
+          toast(`"${z.name}" عليها طلبات قديمة، فوكفناها بدل الحذف (ما تطلع بالطلبات الجديدة)`);
+        } else toast(`انحذفت "${z.name}"`);
+        $("#amain").dataset.view = ""; await this.load(); return;
       }
       if (act === "zoneActive") {
         const z = S.zones.find((x) => String(x.id) === id);

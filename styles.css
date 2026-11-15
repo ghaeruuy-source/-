@@ -392,3 +392,9 @@ a.tab { text-decoration: none; display: inline-flex; align-items: center; }
 .ptab b:hover { opacity: 1; background: var(--line); }
 #ptabs + #atabs { top: calc(57px + var(--ptabs-h, 46px)); }
 .btn.wa { background: #25D366; border-color: #25D366; color: #fff; }
+@media (max-width: 600px) {
+  .zrow { flex-wrap: wrap !important; padding-bottom: 8px; border-bottom: 1px solid var(--line, #eee); }
+  .zrow [data-f="name"] { flex: 1 1 58% !important; min-width: 0; }
+  .zrow [data-f="fee"] { flex: 1 1 30% !important; min-width: 0; }
+  .zrow .btn { flex: 1 1 0; }
+}
