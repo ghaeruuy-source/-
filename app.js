@@ -535,50 +535,73 @@ const Restaurant = {
     }
   },
   formHtml() {
-    const noLoc = S.profile.lat == null;
-    return `${Push.banner("restaurant").replace('margin-top:12px', 'margin-bottom:12px')}
-    <form class="card" id="orderForm" autocomplete="off">
-      <h2>طلب سائق جديد</h2>
-      <div class="seg seg-wide" id="kindSeg" style="margin-bottom:12px"><button type="button" class="${S.kind === "personal" ? "" : "on"}" data-kind="restaurant">🍽 طلب عادي</button><button type="button" class="${S.kind === "personal" ? "on" : ""}" data-kind="personal">🛍 طلب شخصي</button></div>
-      <div data-personal ${S.kind === "personal" ? "" : "hidden"}>
-        <div class="field"><label>شنو المطلوب؟</label><textarea name="request" rows="3" placeholder="مثلاً: 10 صمون + طبقة بيض + كارت رصيد"></textarea></div>
-        <div class="field"><label>منين يشتري؟ (اختياري)</label><input name="place" placeholder="مثلاً: فرن الحلة / أي أسواق قريبة"></div>
-      </div>
+    const noLoc = S.profile.lat == null, per = S.kind === "personal";
+    const zoneOpts = `<option value="">اختار المنطقة</option>${S.zones.filter((z) => z.active).map((z) => `<option value="${z.id}">${esc(z.name)} — ${Number(z.delivery_fee).toLocaleString("en-US")} د.ع</option>`).join("")}`;
+    const seg = `<div class="seg seg-wide" id="kindSeg" style="margin-bottom:14px"><button type="button" class="${per ? "" : "on"}" data-kind="restaurant">🍽 طلب عادي</button><button type="button" class="${per ? "on" : ""}" data-kind="personal">🛍 طلب شخصي</button></div>`;
+    const body = per ? `
+      <div class="po-step"><div class="po-h"><span>1</span>شنو تريد؟</div>
+        <textarea name="request" rows="3" required placeholder="مثلاً: 10 صمون + طبقة بيض + كارت رصيد آسيا"></textarea>
+        <input name="place" placeholder="منين نشتريه؟ (اختياري) مثلاً: فرن الحلة" style="margin-top:8px"></div>
+      <div class="po-step"><div class="po-h"><span>2</span>حدد مكانك</div>
+        <input type="search" id="zoneQ" placeholder="🔍 اكتب اسم منطقتك..." autocomplete="off" style="margin-bottom:6px">
+        <select name="zone" required>${zoneOpts}</select>
+        <div class="map po-map" id="dropMap"></div>
+        <div class="spread" style="margin-top:6px;gap:8px"><span class="small muted" id="dropTxt">دوس على الخريطة بمكان بيتك بالضبط</span><button type="button" class="btn sm" id="dropGps">📍 موقعي الحالي</button></div>
+        <input name="address" placeholder="أقرب نقطة دالة (مثلاً: قرب جامع... / بيت رقم...)" required style="margin-top:8px"></div>
+      <div class="po-step"><div class="po-h"><span>3</span>اكتب رقمك</div>
+        <input name="phone" type="tel" inputmode="tel" placeholder="07xx xxx xxxx" required value="${esc(S.profile.phone || "")}" class="ltr"><div id="phoneWarn"></div></div>
+      <div class="po-step"><div class="po-h"><span>4</span>ثمن الأغراض تقريباً <small class="muted">(اختياري)</small></div>
+        <input name="total" type="text" inputmode="numeric" placeholder="إذا تعرفه، مثلاً 5000"></div>` : `
       <div class="field"><label>المنطقة</label>
         <input type="search" id="zoneQ" placeholder="🔍 اكتب اسم المنطقة..." autocomplete="off" style="margin-bottom:6px">
-        <select name="zone" required><option value="">اختار المنطقة</option>
-          ${S.zones.filter((z) => z.active).map((z) => `<option value="${z.id}">${esc(z.name)} — ${Number(z.delivery_fee).toLocaleString("en-US")} د.ع</option>`).join("")}
-        </select></div>
-      <div class="field"><label id="totalL">${S.kind === "personal" ? "ثمن الأغراض تقريباً (اختياري)" : "مبلغ الطلب (بدون توصيل)"}</label><input name="total" type="text" inputmode="numeric" placeholder="مثلاً 15000" ${S.kind === "personal" ? "" : "required"}></div>
+        <select name="zone" required>${zoneOpts}</select></div>
+      <div class="field"><label>مبلغ الطلب (بدون توصيل)</label><input name="total" type="text" inputmode="numeric" placeholder="مثلاً 15000" required></div>
       <div class="field"><label>رقم الزبون</label><input name="phone" type="tel" inputmode="tel" placeholder="07xx xxx xxxx" required><div id="phoneWarn"></div></div>
       <div class="field"><label>العنوان بالتفصيل</label><input name="address" placeholder="قرب... / شارع... / بيت..." required></div>
-      <div class="field"><label>ملاحظات (اختياري)</label><input name="notes"></div>
+      <div class="field"><label>ملاحظات (اختياري)</label><input name="notes"></div>`;
+    return `${Push.banner("restaurant").replace('margin-top:12px', 'margin-bottom:12px')}
+    <form class="card" id="orderForm" autocomplete="off">
+      <h2>طلب سائق جديد</h2>${seg}${body}
       <div id="sum" class="alert info" hidden></div>
-      <button class="btn primary block big" style="margin-top:12px">اطلب سائق</button>
+      <button class="btn primary block big" style="margin-top:12px">${per ? "🛍 اطلب سائق" : "اطلب سائق"}</button>
     </form>
-    ${!noLoc ? `<p class="small muted" style="text-align:center">📍 موقع المحل محفوظ${S.profile.address ? " (" + esc(S.profile.address) + ")" : ""} · <a href="#" data-act="setloc">عدّله</a></p>` : ""}`;
+    ${!noLoc && !per ? `<p class="small muted" style="text-align:center">📍 موقع المحل محفوظ${S.profile.address ? " (" + esc(S.profile.address) + ")" : ""} · <a href="#" data-act="setloc">عدّله</a></p>` : ""}`;
   },
   bindForm() {
-    const f = $("#orderForm");
+    const f = $("#orderForm"), per = S.kind === "personal";
     const upd = () => {
       const z = S.zones.find((x) => String(x.id) === f.zone.value), t = toNum(f.total.value);
       const box = $("#sum");
-      if (z && !t && S.kind === "personal") { box.hidden = false; box.innerHTML = `الزبون يدفع: <b>ثمن الأغراض + ${money(z.delivery_fee)}</b> توصيل`; return; }
+      if (z && !t && per) { box.hidden = false; box.innerHTML = `تدفع للسائق: <b>ثمن الأغراض + ${money(z.delivery_fee)}</b> توصيل`; return; }
       if (!z || !t) { box.hidden = true; return; }
       box.hidden = false;
-      box.innerHTML = `الزبون يدفع: <b>${money(t + Number(z.delivery_fee))}</b> <span class="small">(${money(t)} طلب + ${money(z.delivery_fee)} توصيل)</span>`;
+      box.innerHTML = `${per ? "تدفع للسائق" : "الزبون يدفع"}: <b>${money(t + Number(z.delivery_fee))}</b> <span class="small">(${money(t)} ${per ? "أغراض" : "طلب"} + ${money(z.delivery_fee)} توصيل)</span>`;
     };
     f.zone.onchange = upd; f.total.oninput = upd;
     $("#kindSeg").onclick = (e) => {
-      const b = e.target.closest("[data-kind]"); if (!b) return;
-      S.kind = b.dataset.kind; const per = S.kind === "personal";
-      $("#kindSeg").querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b));
-      f.querySelector("[data-personal]").hidden = !per; f.request.required = per;
-      f.total.required = !per; $("#totalL").textContent = per ? "ثمن الأغراض تقريباً (اختياري)" : "مبلغ الطلب (بدون توصيل)";
-      f.querySelector("button:not([type=button])").textContent = per ? "اطلب سائق للطلب الشخصي" : "اطلب سائق";
-      upd();
+      const b = e.target.closest("[data-kind]"); if (!b || b.dataset.kind === (S.kind || "restaurant")) return;
+      S.kind = b.dataset.kind; S.drop = null;
+      $("#rmain").innerHTML = this.formHtml(); this.bindForm();
     };
-    if (S.kind === "personal") { f.request.required = true; f.querySelector("button:not([type=button])").textContent = "اطلب سائق للطلب الشخصي"; }
+    let drop = S.drop || null;
+    if (per) {
+      const map = makeMap($("#dropMap"), 13); let mk = null;
+      const set = (ll, zoom) => {
+        drop = S.drop = { lat: ll.lat, lng: ll.lng };
+        if (mk) mk.setLatLng(ll); else { mk = L.marker(ll, { draggable: true, icon: L.divIcon({ className: "", html: `<div class="rest-pin">🏠</div>`, iconSize: [26, 26], iconAnchor: [13, 13] }) }).addTo(map); mk.on("dragend", () => set(mk.getLatLng())); }
+        if (zoom) map.setView(ll, 17);
+        $("#dropTxt").textContent = "✓ تحدد مكانك. تكدر تسحب الدبوس إذا تريد تعدله";
+      };
+      if (drop) set(drop, true);
+      map.on("click", (e) => set(e.latlng));
+      $("#dropGps").onclick = async (e) => {
+        const b = e.currentTarget; b.disabled = true;
+        try { const p = await getPosition(); set({ lat: p.lat, lng: p.lng }, true); }
+        catch (err) { toast("ما كدرنا ناخذ موقعك. اسمح للموقع أو دوس على الخريطة", true); }
+        b.disabled = false;
+      };
+      setTimeout(() => map.invalidateSize(), 80);
+    }
     const zq = $("#zoneQ");
     if (zq) zq.oninput = () => {
       const q = zq.value.trim().replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي");
@@ -587,7 +610,7 @@ const Restaurant = {
       [...f.zone.options].forEach((o) => { if (!o.value) return; const hit = !q || norm(o.textContent).includes(q); o.hidden = !hit; if (hit && !first) first = o; });
       if (q && first && (f.zone.selectedOptions[0]?.hidden || !f.zone.value)) { f.zone.value = first.value; upd(); }
     };
-    f.phone.onblur = async () => {
+    if (!per) f.phone.onblur = async () => {
       const p = normPhone(f.phone.value); const w = $("#phoneWarn"); w.innerHTML = "";
       if (p.length < 10) return;
       try {
@@ -600,11 +623,11 @@ const Restaurant = {
       const b = f.querySelector("button.big"); b.disabled = true;
       try {
         let pos = {};
-        if (S.profile.lat == null) { try { pos = await getPosition(); } catch (_) {} }
-        const o = S.kind === "personal" ? await rpc("create_personal_order", {
-          p_customer_phone: normPhone(f.phone.value), p_zone_id: Number(f.zone.value), p_address: f.address.value,
+        if (S.profile.lat == null && !per) { try { pos = await getPosition(); } catch (_) {} }
+        const o = per ? await rpc("create_personal_order", {
+          p_customer_phone: normPhone(f.phone.value), p_zone_id: Number(f.zone.value), p_address: f.address.value.trim(),
           p_request: f.request.value.trim(), p_pickup_place: f.place.value.trim() || null, p_order_total: toNum(f.total.value) || 0,
-          p_notes: f.notes.value || null,
+          p_drop_lat: drop?.lat ?? null, p_drop_lng: drop?.lng ?? null,
         }) : await rpc("create_order", {
           p_customer_name: null, p_customer_phone: normPhone(f.phone.value), p_zone_id: Number(f.zone.value),
           p_address: f.address.value, p_order_total: toNum(f.total.value), p_notes: f.notes.value || null,
@@ -612,7 +635,7 @@ const Restaurant = {
         });
         if (pos.lat && S.profile.lat == null) Object.assign(S.profile, pos);
         if (!S.orders.find((x) => x.id === o.id)) S.orders.unshift(o);
-        f.reset(); $("#sum").hidden = true; $("#phoneWarn").innerHTML = "";
+        S.drop = null; $("#rmain").dataset.view = "";
         toast(o.status === "offered" ? `طلب #${o.id} انرسل لأقرب سائق` : `طلب #${o.id} انسجل، نبحث عن سائق فاضي`);
         S.tab = "active"; this.render();
       } catch (err) { toast(errMsg(err), true); }
@@ -854,6 +877,7 @@ const Driver = {
           <a class="btn sm" href="tel:${esc(o.customer_phone)}">اتصل بالزبون</a>
           ${o.status !== "accepted" && o.customer_phone ? `<a class="btn sm wa" target="_blank" rel="noopener" href="https://wa.me/964${normPhone(o.customer_phone).replace(/^0/, "")}?text=${encodeURIComponent(`هلا، آني ${S.profile.name || ""} سائق التوصيل${per ? "" : ` من ${r.name || "المطعم"}`}. طلبك بالطريق إلك 🛵`)}">💬 واتساب الزبون</a>` : ""}
           ${mapsLink && o.status === "accepted" ? `<a class="btn sm" target="_blank" rel="noopener" href="${mapsLink}">📍 ${per ? "مكان الشراء" : "طريق المطعم"}</a>` : ""}
+          ${o.drop_lat != null && o.status !== "accepted" ? `<a class="btn sm" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=${o.drop_lat},${o.drop_lng}">📍 موقع الزبون</a>` : ""}
           ${per && o.status === "accepted" && o.customer_phone ? `<a class="btn sm wa" target="_blank" rel="noopener" href="https://wa.me/964${normPhone(o.customer_phone).replace(/^0/, "")}?text=${encodeURIComponent(`هلا، آني ${S.profile.name || ""} سائق التوصيل. وصلني طلبك: ${o.request_text || ""}`)}">💬 واتساب الزبون</a>` : ""}
           ${o.status !== "accepted" ? `<button class="btn sm bad" data-act="refused" data-id="${o.id}">الزبون رفض / ما رد</button>` : ""}
         </div>
@@ -1269,7 +1293,7 @@ const Admin = {
           p_customer_phone: normPhone(f.phone.value), p_zone_id: Number(f.zone.value), p_address: f.address.value.trim(), p_request: f.request.value.trim(),
           p_pickup_place: f.place.value.trim() || null, p_pickup_lat: pin?.lat ?? null, p_pickup_lng: pin?.lng ?? null,
           p_order_total: toNum(f.total.value) || 0, p_fee: f.fee.value ? toNum(f.fee.value) : null,
-          p_customer_name: f.name.value.trim() || null, p_notes: f.notes.value.trim() || null, p_driver: f.driver.value || null,
+          p_customer_name: f.name.value.trim() || null, p_notes: f.notes.value.trim() || null, p_driver: f.driver.value || null, p_drop_lat: null, p_drop_lng: null,
         });
         toast(o?.status === "offered" ? `انرسل الطلب الشخصي #${o.id} للسائق` : `انحفظ الطلب #${o?.id || ""}، ماكو سائق متصل هسه. يتحول أول ما يتصل واحد`);
         bg.remove(); this.load();

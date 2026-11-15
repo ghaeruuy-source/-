@@ -52,3 +52,7 @@ grant execute on function public.create_personal_order(text,bigint,text,text,tex
 -- update: restaurants/shops can also create personal orders from their order form.
 -- create_personal_order accepts role 'restaurant': restaurant_id = caller, fee = zone fee,
 -- no manual driver, pickup defaults to the caller's saved location.
+
+-- update 2: customer drop-off point. orders.drop_lat/drop_lng, and a create_personal_order
+-- overload with p_drop_lat/p_drop_lng (the app always passes them, so PostgREST picks this one;
+-- the old 12-arg version is left in place and can be dropped later).

@@ -401,3 +401,7 @@ a.tab { text-decoration: none; display: inline-flex; align-items: center; }
 .req-text { font-weight: 600; white-space: pre-wrap; }
 .p-map { height: 240px; border-radius: 12px; }
 @media (min-width: 900px) { .p-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; } .p-map { height: 300px; } }
+.po-step { border: 1px solid var(--line, #eee); border-radius: 14px; padding: 12px; margin-bottom: 12px; background: color-mix(in srgb, var(--brand) 3%, transparent); }
+.po-h { display: flex; align-items: center; gap: 8px; font-weight: 700; margin-bottom: 8px; }
+.po-h span { width: 24px; height: 24px; border-radius: 50%; background: var(--brand); color: #fff; display: grid; place-items: center; font-size: 13px; flex: none; }
+.po-map { height: 220px; border-radius: 12px; margin-top: 8px; }
