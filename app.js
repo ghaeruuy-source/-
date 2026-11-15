@@ -78,7 +78,7 @@ function numToWords(num) {
   return parts.join(" و") + " دينار عراقي لا غير";
 }
 const ACTIVE = ["searching", "offered", "accepted", "picked_up", "on_the_way"];
-const chip = (s) => `<span class="chip st-${s}">${STATUS[s] || s}</span>`;
+const chip = (s, o) => `<span class="chip st-${s}">${o?.kind === "personal" && s === "accepted" ? "السائق رايح يشتري" : o?.kind === "personal" && s === "picked_up" ? "اشترى الأغراض" : STATUS[s] || s}</span>`;
 const zoneName = (id) => S.zones.find((z) => z.id === id)?.name || "—";
 
 function toast(msg, err = false) {
@@ -308,6 +308,9 @@ const BIZ = { restaurant: { label: "المطعم", icon: "🍽" }, shop: { label
 const bizInfo = (k) => BIZ[k] || (k ? { label: k, icon: "🏷" } : BIZ.restaurant);
 const bizLabel = (r) => { const b = bizInfo(r?.biz_type); return `${b.icon} ${b.label.replace(/^ال/, "")}`; };
 const bizTypes = () => [...Object.keys(BIZ), ...new Set((S.people || []).map((p) => p.biz_type).filter((k) => k && !BIZ[k]))];
+const isPersonal = (o) => o?.kind === "personal";
+const fromName = (o) => (isPersonal(o) ? "🛍 طلب شخصي" : S.restaurants[o?.restaurant_id]?.name || "مطعم");
+const shopIcon = () => L.divIcon({ className: "", html: `<div class="rest-pin">🛍</div>`, iconSize: [26, 26], iconAnchor: [13, 13] });
 const restIcon = () => L.divIcon({ className: "", html: `<div class="rest-pin">🍽</div>`, iconSize: [26, 26], iconAnchor: [13, 13] });
 const DCOLORS = ["#E8590C", "#1971C2", "#2F9E44", "#AE3EC9", "#E03131", "#0C8599", "#F08C00", "#5F3DC4", "#C2255C", "#5C940D", "#364FC7", "#862E9C"];
 function driverColor(id) {
@@ -600,7 +603,7 @@ const Restaurant = {
     const d = o.driver_id ? S.drivers[o.driver_id] : null;
     const canCancel = ["searching", "offered", "accepted"].includes(o.status);
     return `<div class="card order">
-      <div class="head"><span class="id">#${o.id} · ${esc(o.customer_name)}</span>${chip(o.status)}</div>
+      <div class="head"><span class="id">#${o.id} · ${esc(o.customer_name)}</span>${chip(o.status, o)}</div>
       <dl class="kv">
         <dt>الرقم</dt><dd>${tel(o.customer_phone)}</dd>
         <dt>المنطقة</dt><dd>${esc(zoneName(o.zone_id))} — ${esc(o.address)}</dd>
@@ -707,7 +710,7 @@ const Driver = {
     this.render();
   },
   async loadRestaurants() {
-    const ids = [...new Set(S.orders.map((o) => o.restaurant_id))].filter((id) => !S.restaurants[id]);
+    const ids = [...new Set(S.orders.map((o) => o.restaurant_id))].filter((id) => id && !S.restaurants[id]);
     if (!ids.length) return;
     const { data } = await sb.from("profiles").select("id,name,phone,address,lat,lng").in("id", ids);
     (data || []).forEach((r) => (S.restaurants[r.id] = r));
@@ -738,7 +741,7 @@ const Driver = {
     const offer = this.currentOffer();
     if (offer && S.lastOfferId !== offer.id) {
       S.lastOfferId = offer.id; alarm();
-      notify("طلب جديد!", `${S.restaurants[offer.restaurant_id]?.name || ""} → ${zoneName(offer.zone_id)}`);
+      notify("طلب جديد!", `${fromName(offer)} → ${zoneName(offer.zone_id)}`);
       if (S.tab !== "home") S.tab = "home";
     }
     $("#dtabs").innerHTML = [["home", "الرئيسية"], ["history", "طلباتي"], ["account", "حسابي"]]
@@ -789,42 +792,48 @@ const Driver = {
       <div class="spread"><h2 style="margin:0">طلب جديد #${o.id}</h2><div class="countdown num" data-cd="${o.offer_expires_at}"></div></div>
       <div class="bar" style="margin:8px 0 12px"><i data-bar="${o.offer_expires_at}"></i></div>
       <dl class="kv">
-        <dt>من</dt><dd><b>${esc(r.name || "مطعم")}</b>${r.address ? ` — ${esc(r.address)}` : ""}${pl ? `<br><a class="small" target="_blank" rel="noopener" href="${pl.link}">📍 موقع المطعم على الخريطة</a>${pl.km != null ? ` <span class="small muted">· يبعد عنك ${pl.km < 1 ? Math.round(pl.km * 1000) + " م" : pl.km.toFixed(1) + " كم"}</span>` : ""}` : ""}</dd>
+        ${isPersonal(o) ? `<dt>المطلوب</dt><dd class="req-text">🛍 ${esc(o.request_text || "")}</dd>` : ""}
+        <dt>${isPersonal(o) ? "يشتري من" : "من"}</dt><dd><b>${esc(isPersonal(o) ? o.pickup_place || "أقرب محل" : r.name || "مطعم")}</b>${!isPersonal(o) && r.address ? ` — ${esc(r.address)}` : ""}${pl ? `<br><a class="small" target="_blank" rel="noopener" href="${pl.link}">📍 ${isPersonal(o) ? "مكان الشراء" : "موقع المطعم"} على الخريطة</a>${pl.km != null ? ` <span class="small muted">· يبعد عنك ${pl.km < 1 ? Math.round(pl.km * 1000) + " م" : pl.km.toFixed(1) + " كم"}</span>` : ""}` : ""}</dd>
         <dt>إلى</dt><dd><b>${esc(zoneName(o.zone_id))}</b> — ${esc(o.address)}</dd>
       </dl>
-      <div class="money">
-        <div><span>تدفع للمطعم</span><b>${money(o.order_total)}</b></div>
-        <div class="hl"><span>تستلم من الزبون</span><b>${money(Number(o.order_total) + Number(o.delivery_fee))}</b></div>
-        <div><span>ربحك</span><b>${money(Number(o.delivery_fee) - Number(o.commission))}</b></div>
-      </div>
+      ${this.moneyHtml(o)}
       <div class="row" style="margin-top:14px;flex-wrap:nowrap">
         <button class="btn ok big" style="flex:2" data-act="accept" data-id="${o.id}">قبول</button>
         <button class="btn ghost big" style="flex:1" data-act="decline" data-id="${o.id}">رفض</button>
       </div></div>`;
   },
+  moneyHtml(o) {
+    const fee = Number(o.delivery_fee), tot = Number(o.order_total), net = money(fee - Number(o.commission));
+    if (isPersonal(o)) return `<div class="money">
+        <div><span>ثمن الأغراض</span><b>${tot ? money(tot) + " تقريباً" : "حسب الفاتورة"}</b></div>
+        <div class="hl"><span>تستلم من الزبون</span><b>${tot ? money(tot + fee) : "الفاتورة + " + money(fee)}</b></div>
+        <div><span>ربحك</span><b>${net}</b></div></div>`;
+    return `<div class="money">
+        <div><span>تدفع للمطعم</span><b>${money(tot)}</b></div>
+        <div class="hl"><span>تستلم من الزبون</span><b>${money(tot + fee)}</b></div>
+        <div><span>ربحك</span><b>${net}</b></div></div>`;
+  },
   activeHtml(o) {
     const r = S.restaurants[o.restaurant_id] || {};
-    const next = { accepted: ["picked_up", "استلمت الطلب من المطعم"], picked_up: ["on_the_way", "انطلقت للزبون"], on_the_way: ["delivered", "توصّل ✓ استلمت المبلغ"] }[o.status];
+    const per = isPersonal(o);
+    const next = { accepted: ["picked_up", per ? "اشتريت الأغراض ✓" : "استلمت الطلب من المطعم"], picked_up: ["on_the_way", "انطلقت للزبون"], on_the_way: ["delivered", "توصّل ✓ استلمت المبلغ"] }[o.status];
     const mapsLink = this.placeOf(o)?.link || null;
     return `<div class="card order" style="margin-top:12px">
-      <div class="head"><span class="id">#${o.id}</span>${chip(o.status)}</div>
+      <div class="head"><span class="id">#${o.id}</span>${chip(o.status, o)}</div>
       <dl class="kv">
-        <dt>المطعم</dt><dd><b>${esc(r.name || "")}</b> · ${tel(r.phone || "")}${r.address ? `<br><span class="small muted">${esc(r.address)}</span>` : ""}</dd>
+        ${per ? `<dt>المطلوب</dt><dd class="req-text">🛍 ${esc(o.request_text || "")}</dd><dt>يشتري من</dt><dd><b>${esc(o.pickup_place || "أقرب محل")}</b></dd>` : `<dt>المطعم</dt><dd><b>${esc(r.name || "")}</b> · ${tel(r.phone || "")}${r.address ? `<br><span class="small muted">${esc(r.address)}</span>` : ""}</dd>`}
         <dt>الزبون</dt><dd><b>${esc(o.customer_name)}</b> · ${tel(o.customer_phone)}</dd>
         <dt>العنوان</dt><dd>${esc(zoneName(o.zone_id))} — ${esc(o.address)}</dd>
         ${o.notes ? `<dt>ملاحظات</dt><dd>${esc(o.notes)}</dd>` : ""}
       </dl>
-      <div class="money">
-        <div><span>تدفع للمطعم</span><b>${money(o.order_total)}</b></div>
-        <div class="hl"><span>تستلم من الزبون</span><b>${money(Number(o.order_total) + Number(o.delivery_fee))}</b></div>
-        <div><span>ربحك</span><b>${money(Number(o.delivery_fee) - Number(o.commission))}</b></div>
-      </div>
+      ${this.moneyHtml(o)}
       <div class="stack" style="margin-top:14px">
         ${next ? `<button class="btn primary block big" data-act="status" data-st="${next[0]}" data-id="${o.id}">${next[1]}</button>` : ""}
         <div class="row">
           <a class="btn sm" href="tel:${esc(o.customer_phone)}">اتصل بالزبون</a>
-          ${o.status !== "accepted" && o.customer_phone ? `<a class="btn sm wa" target="_blank" rel="noopener" href="https://wa.me/964${normPhone(o.customer_phone).replace(/^0/, "")}?text=${encodeURIComponent(`هلا، آني ${S.profile.name || ""} سائق التوصيل من ${r.name || "المطعم"}. طلبك بالطريق إلك 🛵`)}">💬 واتساب الزبون</a>` : ""}
-          ${mapsLink && o.status === "accepted" ? `<a class="btn sm" target="_blank" rel="noopener" href="${mapsLink}">📍 طريق المطعم</a>` : ""}
+          ${o.status !== "accepted" && o.customer_phone ? `<a class="btn sm wa" target="_blank" rel="noopener" href="https://wa.me/964${normPhone(o.customer_phone).replace(/^0/, "")}?text=${encodeURIComponent(`هلا، آني ${S.profile.name || ""} سائق التوصيل${per ? "" : ` من ${r.name || "المطعم"}`}. طلبك بالطريق إلك 🛵`)}">💬 واتساب الزبون</a>` : ""}
+          ${mapsLink && o.status === "accepted" ? `<a class="btn sm" target="_blank" rel="noopener" href="${mapsLink}">📍 ${per ? "مكان الشراء" : "طريق المطعم"}</a>` : ""}
+          ${per && o.status === "accepted" && o.customer_phone ? `<a class="btn sm wa" target="_blank" rel="noopener" href="https://wa.me/964${normPhone(o.customer_phone).replace(/^0/, "")}?text=${encodeURIComponent(`هلا، آني ${S.profile.name || ""} سائق التوصيل. وصلني طلبك: ${o.request_text || ""}`)}">💬 واتساب الزبون</a>` : ""}
           ${o.status !== "accepted" ? `<button class="btn sm bad" data-act="refused" data-id="${o.id}">الزبون رفض / ما رد</button>` : ""}
         </div>
       </div></div>`;
@@ -832,7 +841,7 @@ const Driver = {
   historyHtml() {
     const mine = S.orders.filter((o) => o.driver_id === S.profile.id && !["accepted", "picked_up", "on_the_way"].includes(o.status));
     if (!mine.length) return `<div class="card empty">ماكو طلبات بآخر يومين</div>`;
-    return mine.map((o) => `<div class="card order"><div class="head"><span class="id">#${o.id} · ${esc(S.restaurants[o.restaurant_id]?.name || "")}</span>${chip(o.status)}</div>
+    return mine.map((o) => `<div class="card order"><div class="head"><span class="id">#${o.id} · ${esc(fromName(o))}</span>${chip(o.status, o)}</div>
       <div class="small muted">${esc(zoneName(o.zone_id))} · ${dateTime(o.created_at)} · توصيل ${money(o.delivery_fee)} · عمولة ${money(o.commission)}</div></div>`).join("");
   },
   accountHtml() {
@@ -1079,7 +1088,7 @@ const Admin = {
             <div class="stat"><div class="v">${money(n.commission)}</div><div class="l">عمولة اليوم</div></div>
             <div class="stat wide"><div class="v">${money(n.totalDebt)}</div><div class="l">ديون على السائقين</div></div>
           </div>
-          <section class="card pad0"><div class="panel-h spread"><span>الطلبات النشطة</span><button class="btn sm ghost" data-tab-go="map">🗺 الخريطة</button></div>
+          <section class="card pad0"><div class="panel-h spread"><span>الطلبات النشطة</span><span class="row" style="gap:6px"><button class="btn sm primary" data-act="personalOrder">🛍 طلب شخصي</button><button class="btn sm ghost" data-tab-go="map">🗺 الخريطة</button></span></div>
             <div id="liveOrders">${n.active.length ? n.active.map((o) => this.orderRow(o)).join("") : `<div class="empty">ماكو طلبات نشطة هسه</div>`}</div></section>
         </aside>
         <section class="card pad0 lfeed"><div class="panel-h">🔔 آخر الأحداث</div><div id="feed" class="feed-scroll"></div></section>
@@ -1125,11 +1134,11 @@ const Admin = {
     S.feed = ev.sort((a, b) => new Date(b.t) - new Date(a.t)).slice(0, 60);
   },
   feedItem(o, kind, t) {
-    const r = S.restaurants[o.restaurant_id]?.name || "مطعم";
+    const r = fromName(o);
     const d = o.status === "offered" && (o.offered_driver_ids || []).length > 1 ? o.offered_driver_ids.map((x) => S.drivers[x]?.name || "سائق").join("، ") : S.drivers[o.driver_id || o.offered_driver_id]?.name || "السائق";
     const z = zoneName(o.zone_id);
     const map = {
-      created: ["🍽", `<b>${esc(r)}</b> طلب سائق · طلب #${o.id} إلى ${esc(z)}`],
+      created: isPersonal(o) ? ["🛍", `<b>طلب شخصي</b> #${o.id} إلى ${esc(z)}: ${esc((o.request_text || "").slice(0, 50))}`] : ["🍽", `<b>${esc(r)}</b> طلب سائق · طلب #${o.id} إلى ${esc(z)}`],
       offered: ["📨", `انرسل طلب #${o.id} إلى <b>${esc(d)}</b>`],
       accepted: ["🛵", `<b>${esc(d)}</b> وافق على طلب #${o.id} من ${esc(r)}`],
       picked_up: ["📦", `<b>${esc(d)}</b> استلم طلب #${o.id} من ${esc(r)}`],
@@ -1155,7 +1164,8 @@ const Admin = {
     const r = S.restaurants[o.restaurant_id], d = S.drivers[o.driver_id || o.offered_driver_id];
     const waiting = ["searching", "offered"].includes(o.status);
     return `<div class="lorder" data-focus="${o.id}">
-      <div class="spread"><b>#${o.id} · ${esc(r?.name || "")}</b>${chip(o.status)}</div>
+      <div class="spread"><b>#${o.id} · ${esc(fromName(o))}</b>${chip(o.status, o)}</div>
+      ${isPersonal(o) ? `<div class="small req-text">🛍 ${esc(o.request_text || "")}${o.pickup_place ? ` <span class="muted">· من ${esc(o.pickup_place)}</span>` : ""}</div>` : ""}
       <div class="small">${esc(o.customer_name)} · ${tel(o.customer_phone)} · ${esc(zoneName(o.zone_id))}</div>
       <div class="small muted">${money(o.order_total)} + ${money(o.delivery_fee)} · ${time(o.created_at)}${o.status === "offered" && (o.offered_driver_ids || []).length ? ` · معروض على: <b>${o.offered_driver_ids.map((x) => esc(S.drivers[x]?.name || "سائق")).join("، ")}</b>` : d ? ` · ${o.status === "offered" ? "معروض على" : "السائق"}: <b>${esc(d.name)}</b>` : ""}${o.status === "offered" ? ` · <span data-exp="${o.offer_expires_at}"></span>` : ""}</div>
       <div class="row" style="margin-top:6px">
@@ -1164,6 +1174,86 @@ const Admin = {
         <button class="btn sm ghost" data-act="cancelOrder" data-id="${o.id}">إلغاء</button>
       </div>
     </div>`;
+  },
+  personalModal() {
+    const zones = S.zones.filter((z) => z.active);
+    const stale = Number(S.settings?.location_stale_min || 10) * 60000;
+    const bg = modal(`<h3>🛍 طلب شخصي</h3>
+      <p class="small muted" style="margin-top:-8px">زبون يريد يشتري شي (صمون، أغراض، دوا...). اكتب شنو يريد، وحدد مكان الشراء على الخريطة حتى يروح لأقرب سائق.</p>
+      <form id="pForm" autocomplete="off" class="p-grid">
+        <div>
+          <div class="field"><label>شنو يريد الزبون؟</label><textarea name="request" rows="3" required placeholder="مثلاً: 10 صمون + طبقة بيض + لبن"></textarea></div>
+          <div class="field"><label>منين يشتري؟ (اختياري)</label><input name="place" placeholder="مثلاً: فرن الحلة / أي أسواق قريبة"></div>
+          <div class="field"><label>مكان الشراء على الخريطة <span class="small muted">(دوس على الخريطة)</span></label><div class="map p-map" id="pMap"></div><div class="small muted" id="pPin">ما محدد بعد. بدونه السائقين ما يترتبون حسب القرب.</div></div>
+        </div>
+        <div>
+          <div class="field"><label>منطقة الزبون</label>
+            <input type="search" id="pZoneQ" placeholder="🔍 اكتب اسم المنطقة..." style="margin-bottom:6px">
+            <select name="zone" required><option value="">اختار المنطقة</option>${zones.map((z) => `<option value="${z.id}">${esc(z.name)} — ${Number(z.delivery_fee).toLocaleString("en-US")} د.ع</option>`).join("")}</select></div>
+          <div class="field"><label>رقم الزبون</label><input name="phone" type="tel" inputmode="tel" required placeholder="07xx xxx xxxx"></div>
+          <div class="field"><label>العنوان بالتفصيل</label><input name="address" required placeholder="قرب... / شارع... / بيت..."></div>
+          <div class="row" style="flex-wrap:nowrap">
+            <div class="field" style="flex:1"><label>ثمن الأغراض تقريباً</label><input name="total" inputmode="numeric" class="ltr" placeholder="إذا معروف"></div>
+            <div class="field" style="flex:1"><label>أجرة التوصيل</label><input name="fee" inputmode="numeric" class="ltr" placeholder="حسب المنطقة"></div>
+          </div>
+          <div class="field"><label>اسم الزبون وملاحظات (اختياري)</label><div class="row" style="flex-wrap:nowrap"><input name="name" placeholder="الاسم" style="flex:1"><input name="notes" placeholder="ملاحظة" style="flex:2"></div></div>
+          <div class="field"><label>يروح لـ</label><select name="driver" id="pDrv"></select></div>
+          <div id="pSum" class="alert info" hidden></div>
+          <div class="row" style="margin-top:10px;flex-wrap:nowrap"><button class="btn primary big" style="flex:2">إرسال الطلب</button><button type="button" class="btn ghost big" data-close style="flex:1">إلغاء</button></div>
+        </div>
+      </form>`);
+    bg.querySelector(".modal").classList.add("xl");
+    const f = bg.querySelector("#pForm"); let pin = null, marker = null;
+    const km = (d) => (!pin || d.lat == null ? null : Math.hypot((d.lat - pin.lat) * 111, (d.lng - pin.lng) * 93.5));
+    const busy = new Set(S.orders.filter((x) => ["accepted", "picked_up", "on_the_way"].includes(x.status)).map((x) => x.driver_id));
+    const drivers = () => {
+      const keep = f.driver.value;
+      const list = Object.values(S.drivers).filter((d) => d.active && !d.removed_at).map((d) => ({ d, km: km(d), fresh: d.online && Date.now() - new Date(d.location_at) < stale }))
+        .sort((a, b) => (b.fresh - a.fresh) || ((a.km ?? 999) - (b.km ?? 999)));
+      f.driver.innerHTML = `<option value="">⚡ تلقائي: أقرب ${S.settings?.offer_batch || 3} سواق متصلين</option>` + list.map(({ d, km, fresh }) =>
+        `<option value="${d.id}">${esc(d.name)}${km != null ? ` · ${km.toFixed(1)} كم` : ""}${fresh ? "" : " · غير متصل"}${busy.has(d.id) ? " · عنده طلب" : ""}</option>`).join("");
+      f.driver.value = keep;
+    };
+    drivers();
+    const sum = () => {
+      const z = zones.find((x) => String(x.id) === f.zone.value); const fee = f.fee.value ? toNum(f.fee.value) : Number(z?.delivery_fee || 0); const t = toNum(f.total.value);
+      const box = bg.querySelector("#pSum"); if (!z) { box.hidden = true; return; }
+      if (!f.fee.value) f.fee.placeholder = String(z.delivery_fee);
+      box.hidden = false; box.innerHTML = t ? `الزبون يدفع: <b>${money(t + fee)}</b> <span class="small">(${money(t)} أغراض + ${money(fee)} توصيل)</span>` : `الزبون يدفع: <b>الفاتورة + ${money(fee)}</b> توصيل`;
+    };
+    f.zone.onchange = sum; f.total.oninput = sum; f.fee.oninput = sum;
+    const norm = (t) => t.replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي");
+    bg.querySelector("#pZoneQ").oninput = (e) => {
+      const q = norm(e.target.value.trim()); let first = null;
+      [...f.zone.options].forEach((o) => { if (!o.value) return; const hit = !q || norm(o.textContent).includes(q); o.hidden = !hit; if (hit && !first) first = o; });
+      if (q && first && (f.zone.selectedOptions[0]?.hidden || !f.zone.value)) { f.zone.value = first.value; sum(); }
+    };
+    setTimeout(() => {
+      const map = makeMap(bg.querySelector("#pMap"), 13);
+      Object.values(S.drivers).forEach((d) => { if (d.lat != null && d.active && d.online) L.marker([d.lat, d.lng], { icon: driverIcon(d, busy.has(d.id)), interactive: false }).addTo(map); });
+      const setPin = (ll) => {
+        pin = { lat: ll.lat, lng: ll.lng };
+        if (marker) marker.setLatLng(ll); else { marker = L.marker(ll, { icon: shopIcon(), draggable: true }).addTo(map); marker.on("dragend", () => setPin(marker.getLatLng())); }
+        bg.querySelector("#pPin").textContent = "✓ تحدد مكان الشراء. السائقين مرتبين حسب القرب منه."; drivers();
+      };
+      map.on("click", (e) => setPin(e.latlng));
+      map.invalidateSize();
+      new MutationObserver((_, ob) => { if (!document.body.contains(bg)) { map.remove(); ob.disconnect(); } }).observe(document.body, { childList: true });
+    }, 60);
+    f.onsubmit = async (e) => {
+      e.preventDefault();
+      const btn = f.querySelector("button:not([type=button])"); btn.disabled = true;
+      try {
+        const o = await rpc("create_personal_order", {
+          p_customer_phone: normPhone(f.phone.value), p_zone_id: Number(f.zone.value), p_address: f.address.value.trim(), p_request: f.request.value.trim(),
+          p_pickup_place: f.place.value.trim() || null, p_pickup_lat: pin?.lat ?? null, p_pickup_lng: pin?.lng ?? null,
+          p_order_total: toNum(f.total.value) || 0, p_fee: f.fee.value ? toNum(f.fee.value) : null,
+          p_customer_name: f.name.value.trim() || null, p_notes: f.notes.value.trim() || null, p_driver: f.driver.value || null,
+        });
+        toast(o?.status === "offered" ? `انرسل الطلب الشخصي #${o.id} للسائق` : `انحفظ الطلب #${o?.id || ""}، ماكو سائق متصل هسه. يتحول أول ما يتصل واحد`);
+        bg.remove(); this.load();
+      } catch (err) { toast(errMsg(err), true); btn.disabled = false; }
+    };
   },
   assignModal(oid) {
     const o = S.orders.find((x) => x.id === oid); if (!o) return;
@@ -1414,9 +1504,9 @@ const Admin = {
         <div class="stat"><div class="v">${money(del.reduce((a, o) => a + Number(o.delivery_fee), 0))}</div><div class="l">أجور توصيل</div></div>
         <div class="stat"><div class="v">${money(del.reduce((a, o) => a + Number(o.commission), 0))}</div><div class="l">عمولتك</div></div></div>
         <div class="card table-wrap" style="margin-top:12px;padding:0"><table><thead><tr><th>#</th><th>الوقت</th><th>المطعم</th><th>الزبون</th><th>المنطقة</th><th>المبلغ</th><th>التوصيل</th><th>السائق</th><th>الحالة</th></tr></thead><tbody>
-        ${data.map((o) => `<tr><td class="num">${o.id}</td><td class="small">${dateTime(o.created_at)}</td><td>${esc(S.restaurants[o.restaurant_id]?.name || "")}</td>
+        ${data.map((o) => `<tr><td class="num">${o.id}</td><td class="small">${dateTime(o.created_at)}</td><td>${esc(fromName(o))}</td>
           <td>${esc(o.customer_name)}<div class="small">${tel(o.customer_phone)}</div></td><td>${esc(zoneName(o.zone_id))}</td>
-          <td>${money(o.order_total)}</td><td>${money(o.delivery_fee)}</td><td>${esc(S.drivers[o.driver_id]?.name || "—")}</td><td>${chip(o.status)}</td></tr>`).join("") || `<tr><td colspan="9" class="empty">ماكو طلبات</td></tr>`}
+          <td>${money(o.order_total)}</td><td>${money(o.delivery_fee)}</td><td>${esc(S.drivers[o.driver_id]?.name || "—")}</td><td>${chip(o.status, o)}</td></tr>`).join("") || `<tr><td colspan="9" class="empty">ماكو طلبات</td></tr>`}
         </tbody></table></div>`;
     };
     $("#fGo").onclick = go; go();
@@ -2045,6 +2135,7 @@ const Admin = {
     const person = S.people?.find((p) => p.id === id);
     try {
       if (act === "assign") return this.assignModal(Number(id));
+      if (act === "personalOrder") return this.personalModal();
       if (act === "cancelOrder") { if (!confirm(`إلغاء طلب #${id}؟`)) return; await rpc("cancel_order", { oid: Number(id), reason: "ألغته الإدارة" }); toast("انلغى"); }
       if (act === "forceDeliver") { if (!confirm(`تأشير طلب #${id} كـ توصّل؟ (تنحسب العمولة على السائق)`)) return; await rpc("driver_update_status", { oid: Number(id), p_status: "delivered" }); toast("تم"); }
       if (act === "toggleActive") {
@@ -2396,7 +2487,7 @@ const Admin = {
           </div>
           <div class="card table-wrap" style="margin-top:12px;padding:0"><table><thead><tr><th>#</th><th>التاريخ</th><th>الزبون</th><th>المنطقة</th><th>السائق</th><th>قيمة الطلب</th><th>التوصيل</th><th>الحالة</th></tr></thead><tbody>
             ${os.map((o) => `<tr class="${["refused", "cancelled"].includes(o.status) ? "voided" : ""}"><td class="num">${o.id}</td><td class="num">${dateTime(o.created_at)}</td><td>${esc(o.customer_name || "")}<div class="small muted num">${esc(o.customer_phone || "")}</div></td>
-              <td>${esc(zn(o.zone_id))}</td><td>${esc(S.drivers[o.driver_id]?.name || "")}</td><td class="num">${n(o.order_total)}</td><td class="num">${n(o.delivery_fee)}</td><td>${chip(o.status)}</td></tr>`).join("") || `<tr><td colspan="8" class="empty">ماكو طلبات بهذي الفترة</td></tr>`}
+              <td>${esc(zn(o.zone_id))}</td><td>${esc(S.drivers[o.driver_id]?.name || "")}</td><td class="num">${n(o.order_total)}</td><td class="num">${n(o.delivery_fee)}</td><td>${chip(o.status, o)}</td></tr>`).join("") || `<tr><td colspan="8" class="empty">ماكو طلبات بهذي الفترة</td></tr>`}
             <tr class="tot"><td colspan="5"><b>مجموع الواصلة (${del.length})</b></td><td class="num"><b>${n(sum(del, "order_total")) || 0}</b></td><td class="num"><b>${n(sum(del, "delivery_fee")) || 0}</b></td><td></td></tr>
           </tbody></table></div>
           <div class="print-only sig"><div>توقيع المطعم</div><div>توقيع المحاسب</div></div>`;

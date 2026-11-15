@@ -398,3 +398,6 @@ a.tab { text-decoration: none; display: inline-flex; align-items: center; }
   .zrow [data-f="fee"] { flex: 1 1 30% !important; min-width: 0; }
   .zrow .btn { flex: 1 1 0; }
 }
+.req-text { font-weight: 600; white-space: pre-wrap; }
+.p-map { height: 240px; border-radius: 12px; }
+@media (min-width: 900px) { .p-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; } .p-map { height: 300px; } }
