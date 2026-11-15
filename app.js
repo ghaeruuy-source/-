@@ -792,6 +792,7 @@ const Driver = {
         ${next ? `<button class="btn primary block big" data-act="status" data-st="${next[0]}" data-id="${o.id}">${next[1]}</button>` : ""}
         <div class="row">
           <a class="btn sm" href="tel:${esc(o.customer_phone)}">اتصل بالزبون</a>
+          ${o.status !== "accepted" && o.customer_phone ? `<a class="btn sm wa" target="_blank" rel="noopener" href="https://wa.me/964${normPhone(o.customer_phone).replace(/^0/, "")}?text=${encodeURIComponent(`هلا، آني ${S.profile.name || ""} سائق التوصيل من ${r.name || "المطعم"}. طلبك بالطريق إلك 🛵`)}">💬 واتساب الزبون</a>` : ""}
           ${mapsLink && o.status === "accepted" ? `<a class="btn sm" target="_blank" rel="noopener" href="${mapsLink}">📍 طريق المطعم</a>` : ""}
           ${o.status !== "accepted" ? `<button class="btn sm bad" data-act="refused" data-id="${o.id}">الزبون رفض / ما رد</button>` : ""}
         </div>

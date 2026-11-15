@@ -391,3 +391,4 @@ a.tab { text-decoration: none; display: inline-flex; align-items: center; }
 .ptab b { font-weight: 400; opacity: .55; padding: 0 3px; border-radius: 6px; cursor: pointer; }
 .ptab b:hover { opacity: 1; background: var(--line); }
 #ptabs + #atabs { top: calc(57px + var(--ptabs-h, 46px)); }
+.btn.wa { background: #25D366; border-color: #25D366; color: #fff; }
