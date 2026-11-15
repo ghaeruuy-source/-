@@ -687,7 +687,7 @@ const Driver = {
     const me = S.profile.id;
     const since = new Date(Date.now() - 2 * 864e5).toISOString();
     const [{ data: orders }, { data: ledger }, { data: prof }] = await Promise.all([
-      sb.from("orders").select("*").or(`offered_driver_id.eq.${me},and(driver_id.eq.${me},or(status.in.(accepted,picked_up,on_the_way),created_at.gte.${since}))`).order("id", { ascending: false }).limit(100),
+      sb.from("orders").select("*").or(`offered_driver_id.eq.${me},offer_seen_by.cs.{${me}},and(driver_id.eq.${me},or(status.in.(accepted,picked_up,on_the_way),created_at.gte.${since}))`).order("id", { ascending: false }).limit(100),
       sb.from("ledger").select("*").eq("driver_id", me).order("id", { ascending: false }).limit(100),
       sb.from("profiles").select("*").eq("id", me).maybeSingle(),
     ]);
@@ -708,21 +708,23 @@ const Driver = {
     const onOrder = async (p) => {
       const o = p.new; if (!o?.id) return;
       const i = S.orders.findIndex((x) => x.id === o.id);
+      const prev = i >= 0 ? S.orders[i] : null;
       if (i >= 0) S.orders[i] = o; else S.orders.unshift(o);
+      // the offer went to several drivers and someone else took it
+      if (prev && this.isMyOffer(prev) && o.driver_id && o.driver_id !== me) toast("سائق ثاني سبقك وأخذ الطلب #" + o.id);
       await this.loadRestaurants();
       this.render();
     };
     S.channel = sb.channel("drv-" + me)
-      .on("postgres_changes", { event: "*", schema: "public", table: "orders", filter: `offered_driver_id=eq.${me}` }, onOrder)
+      .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, (p) => { const o = p.new; if (o?.driver_id === me) return; onOrder(p); })
       .on("postgres_changes", { event: "*", schema: "public", table: "orders", filter: `driver_id=eq.${me}` }, onOrder)
       .on("postgres_changes", { event: "*", schema: "public", table: "ledger", filter: `driver_id=eq.${me}` }, () => this.load())
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "settings" }, (p) => { S.settings = p.new; applyBranding(); this.render(); })
       .subscribe((status) => { if (status === "SUBSCRIBED") this.load(); });
   },
   debt() { return S.ledger.reduce((a, l) => a + Number(l.amount), 0); },
-  currentOffer() {
-    return S.orders.find((o) => o.status === "offered" && o.offered_driver_id === S.profile.id && new Date(o.offer_expires_at) > Date.now());
-  },
+  isMyOffer(o) { return o.status === "offered" && ((o.offered_driver_ids || []).includes(S.profile.id) || o.offered_driver_id === S.profile.id) && new Date(o.offer_expires_at) > Date.now(); },
+  currentOffer() { return S.orders.find((o) => this.isMyOffer(o)); },
   render() {
     const offer = this.currentOffer();
     if (offer && S.lastOfferId !== offer.id) {
@@ -1115,7 +1117,7 @@ const Admin = {
   },
   feedItem(o, kind, t) {
     const r = S.restaurants[o.restaurant_id]?.name || "مطعم";
-    const d = S.drivers[o.driver_id || o.offered_driver_id]?.name || "السائق";
+    const d = o.status === "offered" && (o.offered_driver_ids || []).length > 1 ? o.offered_driver_ids.map((x) => S.drivers[x]?.name || "سائق").join("، ") : S.drivers[o.driver_id || o.offered_driver_id]?.name || "السائق";
     const z = zoneName(o.zone_id);
     const map = {
       created: ["🍽", `<b>${esc(r)}</b> طلب سائق · طلب #${o.id} إلى ${esc(z)}`],
@@ -1146,7 +1148,7 @@ const Admin = {
     return `<div class="lorder" data-focus="${o.id}">
       <div class="spread"><b>#${o.id} · ${esc(r?.name || "")}</b>${chip(o.status)}</div>
       <div class="small">${esc(o.customer_name)} · ${tel(o.customer_phone)} · ${esc(zoneName(o.zone_id))}</div>
-      <div class="small muted">${money(o.order_total)} + ${money(o.delivery_fee)} · ${time(o.created_at)}${d ? ` · ${o.status === "offered" ? "معروض على" : "السائق"}: <b>${esc(d.name)}</b>` : ""}${o.status === "offered" ? ` · <span data-exp="${o.offer_expires_at}"></span>` : ""}</div>
+      <div class="small muted">${money(o.order_total)} + ${money(o.delivery_fee)} · ${time(o.created_at)}${o.status === "offered" && (o.offered_driver_ids || []).length ? ` · معروض على: <b>${o.offered_driver_ids.map((x) => esc(S.drivers[x]?.name || "سائق")).join("، ")}</b>` : d ? ` · ${o.status === "offered" ? "معروض على" : "السائق"}: <b>${esc(d.name)}</b>` : ""}${o.status === "offered" ? ` · <span data-exp="${o.offer_expires_at}"></span>` : ""}</div>
       <div class="row" style="margin-top:6px">
         ${waiting ? `<button class="btn sm dark" data-act="assign" data-id="${o.id}">إرسال لسائق</button>` : ""}
         ${o.driver_id ? `<button class="btn sm ghost" data-act="forceDeliver" data-id="${o.id}">تأشير توصّل</button>` : ""}
@@ -1983,6 +1985,7 @@ const Admin = {
       <div class="field"><label>حد الدين (يوقف الطلبات عن السائق لحد ما يسدد) — 0 = بلا حد</label><input name="debt_cap" inputmode="numeric" class="ltr" value="${s.debt_cap}"></div>
       <div class="section-title">التوزيع</div>
       <div class="field"><label>مهلة قبول السائق (ثانية)</label><input name="offer_timeout_sec" inputmode="numeric" class="ltr" value="${s.offer_timeout_sec}"></div>
+      <div class="field"><label>الطلب يوصل لكم سائق سوية (الأقرب)</label><input name="offer_batch" inputmode="numeric" class="ltr" value="${s.offer_batch ?? 3}"></div>
       <div class="field"><label>كم طلب بنفس الوقت للسائق</label><input name="max_active_per_driver" inputmode="numeric" class="ltr" value="${s.max_active_per_driver}"></div>
       <div class="field"><label>السائق يعتبر غير متصل إذا موقعه ما تحدث خلال (دقيقة)</label><input name="location_stale_min" inputmode="numeric" class="ltr" value="${s.location_stale_min}"></div>
       <button class="btn primary block big">حفظ</button>
@@ -2009,6 +2012,7 @@ const Admin = {
         support_phone: f.support_phone.value.trim() || null, commission_type: f.commission_type.value,
         commission_value: toNum(f.commission_value.value), debt_cap: toNum(f.debt_cap.value),
         offer_timeout_sec: Math.max(10, toNum(f.offer_timeout_sec.value) || 30),
+        offer_batch: Math.min(20, Math.max(1, toNum(f.offer_batch.value) || 3)),
         max_active_per_driver: Math.max(1, toNum(f.max_active_per_driver.value) || 1),
         location_stale_min: Math.max(2, toNum(f.location_stale_min.value) || 10), updated_at: new Date().toISOString(),
       };
