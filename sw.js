@@ -1,5 +1,5 @@
 // Minimal service worker: makes the app installable and caches the shell.
-const CACHE = "jayek-v32";
+const CACHE = "jayek-v33";
 const SHELL = ["./", "index.html", "styles.css", "app.js", "config.js", "icon.svg", "icon-192.png"];
 self.addEventListener("install", (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).catch(() => {})); self.skipWaiting(); });
 self.addEventListener("activate", (e) => { e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE).map((k) => caches.delete(k))))); self.clients.claim(); });
@@ -12,8 +12,8 @@ self.addEventListener("push", (e) => {
   let d = {};
   try { d = e.data ? e.data.json() : {}; } catch (_) { d = { title: "جايك بالطريق", body: e.data && e.data.text() }; }
   e.waitUntil(self.registration.showNotification(d.title || d.app || "جايك بالطريق", {
-    body: d.body || "", tag: d.tag, renotify: true, silent: false, requireInteraction: !!d.requireInteraction,
-    vibrate: d.vibrate || [200, 100, 200], icon: "icon-192.png", badge: "icon-192.png", dir: "rtl", lang: "ar",
+    body: d.body || "", tag: d.tag, renotify: true, silent: false, requireInteraction: !!d.requireInteraction || /طلب جديد/.test(d.title || ""),
+    vibrate: d.vibrate || [600, 150, 600, 150, 600, 150, 900], icon: "icon-192.png", badge: "icon-192.png", dir: "rtl", lang: "ar",
     data: { url: d.url || "./" },
   }));
 });

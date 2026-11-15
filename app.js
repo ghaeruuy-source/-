@@ -136,6 +136,26 @@ function beep() {
   } catch (_) {}
   try { navigator.vibrate?.([300, 150, 300, 150, 300]); } catch (_) {}
 }
+// loud siren for a new delivery offer (driver): two-tone, square wave, max volume through a compressor
+function alarm() {
+  try {
+    const ctx = beep.ctx || (beep.ctx = new (window.AudioContext || window.webkitAudioContext)());
+    if (ctx.state === "suspended") ctx.resume();
+    const comp = ctx.createDynamicsCompressor(); comp.threshold.value = -6; comp.ratio.value = 4;
+    const master = ctx.createGain(); master.gain.value = 1; master.connect(comp); comp.connect(ctx.destination);
+    const t0 = ctx.currentTime;
+    for (let i = 0; i < 6; i++) {
+      const o = ctx.createOscillator(), g = ctx.createGain(), t = t0 + i * 0.22;
+      o.type = "square"; o.frequency.setValueAtTime(i % 2 ? 1320 : 990, t);
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.9, t + 0.02);
+      g.gain.setValueAtTime(0.9, t + 0.17); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
+      o.connect(g); g.connect(master); o.start(t); o.stop(t + 0.21);
+    }
+  } catch (_) {}
+  try { navigator.vibrate?.([600, 150, 600, 150, 600]); } catch (_) {}
+}
+// browsers only allow sound after a tap: unlock audio on the first touch anywhere
+document.addEventListener("pointerdown", () => { try { const c = beep.ctx || (beep.ctx = new (window.AudioContext || window.webkitAudioContext)()); if (c.state === "suspended") c.resume(); } catch (_) {} }, { passive: true });
 function notify(title, body) {
   try {
     if ("Notification" in window && Notification.permission === "granted" && document.hidden) {
@@ -706,7 +726,7 @@ const Driver = {
   render() {
     const offer = this.currentOffer();
     if (offer && S.lastOfferId !== offer.id) {
-      S.lastOfferId = offer.id; beep();
+      S.lastOfferId = offer.id; alarm();
       notify("طلب جديد!", `${S.restaurants[offer.restaurant_id]?.name || ""} → ${zoneName(offer.zone_id)}`);
       if (S.tab !== "home") S.tab = "home";
     }
@@ -812,9 +832,9 @@ const Driver = {
       <div class="card">${S.ledger.length ? S.ledger.map((l) => `<div class="ledger-item"><div>${esc(l.note || (l.kind === "settlement" ? "تسديد" : l.kind === "commission" ? "عمولة" : "تعديل"))}<div class="small muted">${dateTime(l.created_at)}</div></div><b class="${Number(l.amount) > 0 ? "pos" : "neg"}">${Number(l.amount) > 0 ? "+" : ""}${money(l.amount)}</b></div>`).join("") : `<div class="empty">ماكو حركات</div>`}</div>`;
   },
   tick() {
-    // keep ringing every 3 seconds while an offer is waiting
+    // keep ringing every 2 seconds while an offer is waiting
     const off = this.currentOffer();
-    if (off && Math.round((new Date(off.offer_expires_at) - Date.now()) / 1000) % 3 === 0) beep();
+    if (off && Math.round((new Date(off.offer_expires_at) - Date.now()) / 1000) % 2 === 0) alarm();
     document.querySelectorAll("[data-cd]").forEach((el) => {
       const s = Math.max(0, Math.round((new Date(el.dataset.cd) - Date.now()) / 1000));
       el.textContent = s;
