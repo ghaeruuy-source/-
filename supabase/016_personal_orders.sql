@@ -48,3 +48,7 @@ grant execute on function public.create_personal_order(text,bigint,text,text,tex
 -- notify_push: no restaurant to tell for personal orders
 -- profit_report: personal orders grouped as "طلبات شخصية" in by_restaurant
 -- (both patched in place with replace(), see thread notes)
+
+-- update: restaurants/shops can also create personal orders from their order form.
+-- create_personal_order accepts role 'restaurant': restaurant_id = caller, fee = zone fee,
+-- no manual driver, pickup defaults to the caller's saved location.

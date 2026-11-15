@@ -309,7 +309,7 @@ const bizInfo = (k) => BIZ[k] || (k ? { label: k, icon: "🏷" } : BIZ.restauran
 const bizLabel = (r) => { const b = bizInfo(r?.biz_type); return `${b.icon} ${b.label.replace(/^ال/, "")}`; };
 const bizTypes = () => [...Object.keys(BIZ), ...new Set((S.people || []).map((p) => p.biz_type).filter((k) => k && !BIZ[k]))];
 const isPersonal = (o) => o?.kind === "personal";
-const fromName = (o) => (isPersonal(o) ? "🛍 طلب شخصي" : S.restaurants[o?.restaurant_id]?.name || "مطعم");
+const fromName = (o) => (isPersonal(o) ? `🛍 طلب شخصي${o.restaurant_id && S.restaurants[o.restaurant_id] ? " · " + S.restaurants[o.restaurant_id].name : ""}` : S.restaurants[o?.restaurant_id]?.name || "مطعم");
 const shopIcon = () => L.divIcon({ className: "", html: `<div class="rest-pin">🛍</div>`, iconSize: [26, 26], iconAnchor: [13, 13] });
 const restIcon = () => L.divIcon({ className: "", html: `<div class="rest-pin">🍽</div>`, iconSize: [26, 26], iconAnchor: [13, 13] });
 const DCOLORS = ["#E8590C", "#1971C2", "#2F9E44", "#AE3EC9", "#E03131", "#0C8599", "#F08C00", "#5F3DC4", "#C2255C", "#5C940D", "#364FC7", "#862E9C"];
@@ -539,12 +539,17 @@ const Restaurant = {
     return `${Push.banner("restaurant").replace('margin-top:12px', 'margin-bottom:12px')}
     <form class="card" id="orderForm" autocomplete="off">
       <h2>طلب سائق جديد</h2>
+      <div class="seg seg-wide" id="kindSeg" style="margin-bottom:12px"><button type="button" class="${S.kind === "personal" ? "" : "on"}" data-kind="restaurant">🍽 طلب عادي</button><button type="button" class="${S.kind === "personal" ? "on" : ""}" data-kind="personal">🛍 طلب شخصي</button></div>
+      <div data-personal ${S.kind === "personal" ? "" : "hidden"}>
+        <div class="field"><label>شنو المطلوب؟</label><textarea name="request" rows="3" placeholder="مثلاً: 10 صمون + طبقة بيض + كارت رصيد"></textarea></div>
+        <div class="field"><label>منين يشتري؟ (اختياري)</label><input name="place" placeholder="مثلاً: فرن الحلة / أي أسواق قريبة"></div>
+      </div>
       <div class="field"><label>المنطقة</label>
         <input type="search" id="zoneQ" placeholder="🔍 اكتب اسم المنطقة..." autocomplete="off" style="margin-bottom:6px">
         <select name="zone" required><option value="">اختار المنطقة</option>
           ${S.zones.filter((z) => z.active).map((z) => `<option value="${z.id}">${esc(z.name)} — ${Number(z.delivery_fee).toLocaleString("en-US")} د.ع</option>`).join("")}
         </select></div>
-      <div class="field"><label>مبلغ الطلب (بدون توصيل)</label><input name="total" type="text" inputmode="numeric" placeholder="مثلاً 15000" required></div>
+      <div class="field"><label id="totalL">${S.kind === "personal" ? "ثمن الأغراض تقريباً (اختياري)" : "مبلغ الطلب (بدون توصيل)"}</label><input name="total" type="text" inputmode="numeric" placeholder="مثلاً 15000" ${S.kind === "personal" ? "" : "required"}></div>
       <div class="field"><label>رقم الزبون</label><input name="phone" type="tel" inputmode="tel" placeholder="07xx xxx xxxx" required><div id="phoneWarn"></div></div>
       <div class="field"><label>العنوان بالتفصيل</label><input name="address" placeholder="قرب... / شارع... / بيت..." required></div>
       <div class="field"><label>ملاحظات (اختياري)</label><input name="notes"></div>
@@ -558,11 +563,22 @@ const Restaurant = {
     const upd = () => {
       const z = S.zones.find((x) => String(x.id) === f.zone.value), t = toNum(f.total.value);
       const box = $("#sum");
+      if (z && !t && S.kind === "personal") { box.hidden = false; box.innerHTML = `الزبون يدفع: <b>ثمن الأغراض + ${money(z.delivery_fee)}</b> توصيل`; return; }
       if (!z || !t) { box.hidden = true; return; }
       box.hidden = false;
       box.innerHTML = `الزبون يدفع: <b>${money(t + Number(z.delivery_fee))}</b> <span class="small">(${money(t)} طلب + ${money(z.delivery_fee)} توصيل)</span>`;
     };
     f.zone.onchange = upd; f.total.oninput = upd;
+    $("#kindSeg").onclick = (e) => {
+      const b = e.target.closest("[data-kind]"); if (!b) return;
+      S.kind = b.dataset.kind; const per = S.kind === "personal";
+      $("#kindSeg").querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b));
+      f.querySelector("[data-personal]").hidden = !per; f.request.required = per;
+      f.total.required = !per; $("#totalL").textContent = per ? "ثمن الأغراض تقريباً (اختياري)" : "مبلغ الطلب (بدون توصيل)";
+      f.querySelector("button:not([type=button])").textContent = per ? "اطلب سائق للطلب الشخصي" : "اطلب سائق";
+      upd();
+    };
+    if (S.kind === "personal") { f.request.required = true; f.querySelector("button:not([type=button])").textContent = "اطلب سائق للطلب الشخصي"; }
     const zq = $("#zoneQ");
     if (zq) zq.oninput = () => {
       const q = zq.value.trim().replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي");
@@ -585,7 +601,11 @@ const Restaurant = {
       try {
         let pos = {};
         if (S.profile.lat == null) { try { pos = await getPosition(); } catch (_) {} }
-        const o = await rpc("create_order", {
+        const o = S.kind === "personal" ? await rpc("create_personal_order", {
+          p_customer_phone: normPhone(f.phone.value), p_zone_id: Number(f.zone.value), p_address: f.address.value,
+          p_request: f.request.value.trim(), p_pickup_place: f.place.value.trim() || null, p_order_total: toNum(f.total.value) || 0,
+          p_notes: f.notes.value || null,
+        }) : await rpc("create_order", {
           p_customer_name: null, p_customer_phone: normPhone(f.phone.value), p_zone_id: Number(f.zone.value),
           p_address: f.address.value, p_order_total: toNum(f.total.value), p_notes: f.notes.value || null,
           p_lat: pos.lat ?? null, p_lng: pos.lng ?? null,
@@ -603,11 +623,12 @@ const Restaurant = {
     const d = o.driver_id ? S.drivers[o.driver_id] : null;
     const canCancel = ["searching", "offered", "accepted"].includes(o.status);
     return `<div class="card order">
-      <div class="head"><span class="id">#${o.id} · ${esc(o.customer_name)}</span>${chip(o.status, o)}</div>
+      <div class="head"><span class="id">#${o.id} · ${isPersonal(o) ? "🛍 طلب شخصي" : esc(o.customer_name)}</span>${chip(o.status, o)}</div>
       <dl class="kv">
+        ${isPersonal(o) ? `<dt>المطلوب</dt><dd class="req-text">${esc(o.request_text || "")}${o.pickup_place ? `<br><span class="small muted">من ${esc(o.pickup_place)}</span>` : ""}</dd>` : ""}
         <dt>الرقم</dt><dd>${tel(o.customer_phone)}</dd>
         <dt>المنطقة</dt><dd>${esc(zoneName(o.zone_id))} — ${esc(o.address)}</dd>
-        <dt>المبلغ</dt><dd>${money(o.order_total)} + ${money(o.delivery_fee)} توصيل</dd>
+        <dt>المبلغ</dt><dd>${isPersonal(o) && !Number(o.order_total) ? "ثمن الأغراض" : money(o.order_total)} + ${money(o.delivery_fee)} توصيل</dd>
         ${d ? `<dt>السائق</dt><dd>${esc(d.name)} · ${tel(d.phone)}</dd>` : ""}
         <dt>الوقت</dt><dd>${compact ? dateTime(o.created_at) : time(o.created_at)}</dd>
         ${o.close_reason ? `<dt>ملاحظة</dt><dd>${esc(o.close_reason)}</dd>` : ""}
@@ -821,7 +842,7 @@ const Driver = {
     return `<div class="card order" style="margin-top:12px">
       <div class="head"><span class="id">#${o.id}</span>${chip(o.status, o)}</div>
       <dl class="kv">
-        ${per ? `<dt>المطلوب</dt><dd class="req-text">🛍 ${esc(o.request_text || "")}</dd><dt>يشتري من</dt><dd><b>${esc(o.pickup_place || "أقرب محل")}</b></dd>` : `<dt>المطعم</dt><dd><b>${esc(r.name || "")}</b> · ${tel(r.phone || "")}${r.address ? `<br><span class="small muted">${esc(r.address)}</span>` : ""}</dd>`}
+        ${per ? `<dt>المطلوب</dt><dd class="req-text">🛍 ${esc(o.request_text || "")}</dd><dt>يشتري من</dt><dd><b>${esc(o.pickup_place || "أقرب محل")}</b></dd>${r.name ? `<dt>صاحب الطلب</dt><dd>${esc(r.name)} · ${tel(r.phone || "")}</dd>` : ""}` : `<dt>المطعم</dt><dd><b>${esc(r.name || "")}</b> · ${tel(r.phone || "")}${r.address ? `<br><span class="small muted">${esc(r.address)}</span>` : ""}</dd>`}
         <dt>الزبون</dt><dd><b>${esc(o.customer_name)}</b> · ${tel(o.customer_phone)}</dd>
         <dt>العنوان</dt><dd>${esc(zoneName(o.zone_id))} — ${esc(o.address)}</dd>
         ${o.notes ? `<dt>ملاحظات</dt><dd>${esc(o.notes)}</dd>` : ""}
