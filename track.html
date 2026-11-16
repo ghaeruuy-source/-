@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#E8590C">
+  <title>تتبع طلبك</title>
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+  <style>
+    :root { --brand: #E8590C; --bg: #f6f3ef; --card: #fff; --ink: #1d1d1f; --muted: #6e6a66; --line: #ece7e1; --ok: #1f8a4c; --bad: #c62828; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: "IBM Plex Sans Arabic", system-ui, sans-serif; background: var(--bg); color: var(--ink); }
+    .wrap { max-width: 520px; margin: 0 auto; padding: 14px 16px 40px; }
+    header { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+    header .logo { width: 38px; height: 38px; border-radius: 10px; background: var(--brand); color: #fff; display: grid; place-items: center; font-weight: 700; overflow: hidden; }
+    header .logo img { width: 100%; height: 100%; object-fit: cover; }
+    header b { font-size: 18px; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px; margin-bottom: 12px; }
+    .status { font-size: 22px; font-weight: 700; margin: 0 0 4px; }
+    .muted { color: var(--muted); } .small { font-size: 13px; }
+    .eta { display: inline-block; margin-top: 6px; background: color-mix(in srgb, var(--brand) 12%, transparent); color: var(--brand); padding: 4px 10px; border-radius: 99px; font-weight: 600; font-size: 14px; }
+    .steps { display: flex; gap: 4px; margin: 14px 0 2px; }
+    .steps i { flex: 1; height: 6px; border-radius: 9px; background: var(--line); }
+    .steps i.on { background: var(--brand); }
+    .steps-l { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); }
+    #map { height: 300px; border-radius: 16px; border: 1px solid var(--line); margin-bottom: 12px; }
+    .pin { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font-size: 18px; background: #fff; border: 2px solid var(--brand); box-shadow: 0 2px 6px rgba(0,0,0,.2); }
+    .pin.drv { background: var(--brand); }
+    .code { text-align: center; }
+    .code .n { font-size: 40px; letter-spacing: 10px; font-weight: 700; direction: ltr; color: var(--brand); }
+    .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 10px 14px; border-radius: 12px; background: var(--brand); color: #fff; text-decoration: none; font-weight: 600; font-size: 15px; }
+    .btn.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+    dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 0; }
+    dt { color: var(--muted); } dd { margin: 0; }
+    .total { font-size: 18px; font-weight: 700; }
+    .num { font-variant-numeric: tabular-nums; }
+    .center { text-align: center; padding: 60px 10px; }
+    .done { color: var(--ok); } .bad { color: var(--bad); }
+  </style>
+</head>
+<body>
+  <div class="wrap"><div id="root"><div class="center muted">جاري التحميل...</div></div><div id="map" hidden></div><div id="rest"></div></div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="config.js?v=40"></script>
+  <script>
+  (() => {
+    const C = window.JAYEK_CONFIG;
+    const sb = window.supabase.createClient(C.supabaseUrl, C.supabaseKey, { auth: { persistSession: false } });
+    const token = new URLSearchParams(location.search).get("t") || "";
+    const root = document.getElementById("root");
+    const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    const money = (n) => `<bdi dir="ltr" class="num">${Number(n || 0).toLocaleString("en-US")}</bdi> د.ع`;
+    const km = (a, b) => { const R = 6371, r = Math.PI / 180, dLa = (b.lat - a.lat) * r, dLo = (b.lng - a.lng) * r;
+      const x = Math.sin(dLa / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(dLo / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(x)); };
+    const mins = (k) => Math.max(2, Math.round((k * 1.3) / 25 * 60)); // road factor, ~25 km/h in the city
+    let map, mk = {}, fitted = false, timer;
+
+    const STEPS = ["استلمنا الطلب", "السائق قبل", "استلم الطلب", "توصّل"];
+    function info(o) {
+      const per = o.kind === "personal";
+      switch (o.status) {
+        case "searching": case "offered": return { t: "ندوّر لك على سائق قريب...", s: 0 };
+        case "accepted": return { t: per ? "السائق رايح يشتري طلبك 🛍" : `السائق رايح يستلم طلبك من ${esc(o.from || "المطعم")}`, s: 1 };
+        case "picked_up": case "on_the_way": return { t: "طلبك بالطريق إلك 🛵", s: 2 };
+        case "delivered": return { t: "توصّل طلبك ✓ بالعافية", s: 3, cls: "done" };
+        case "refused": return { t: "الطلب انسد", s: -1, cls: "bad" };
+        case "cancelled": return { t: "الطلب انلغى", s: -1, cls: "bad" };
+        default: return { t: o.status, s: 0 };
+      }
+    }
+    function eta(o) {
+      const d = o.driver; if (!d || d.lat == null) return null;
+      const me = { lat: d.lat, lng: d.lng };
+      if (o.status === "accepted") {
+        let k = o.pickup ? km(me, o.pickup) : 1.5;
+        k += o.pickup && o.drop ? km(o.pickup, o.drop) : 3;
+        return mins(k) + (o.kind === "personal" ? 8 : 4);
+      }
+      if (["picked_up", "on_the_way"].includes(o.status)) return o.drop ? mins(km(me, o.drop)) : null;
+      return null;
+    }
+    function icon(html, cls) { return L.divIcon({ className: "", html: `<div class="pin ${cls || ""}">${html}</div>`, iconSize: [34, 34], iconAnchor: [17, 17] }); }
+    function drawMap(o) {
+      const pts = [];
+      const set = (k, ll, html, cls) => {
+        if (!ll || ll.lat == null) { if (mk[k]) { mk[k].remove(); delete mk[k]; } return; }
+        pts.push([ll.lat, ll.lng]);
+        if (mk[k]) mk[k].setLatLng([ll.lat, ll.lng]); else mk[k] = L.marker([ll.lat, ll.lng], { icon: icon(html, cls) }).addTo(map);
+      };
+      set("pickup", o.status === "accepted" ? o.pickup : null, o.kind === "personal" ? "🛍" : "🍽");
+      set("drop", o.drop, "🏠");
+      set("drv", o.driver && o.driver.lat != null ? o.driver : null, o.driver?.vehicle === "car" ? "🚗" : "🛵", "drv");
+      if (!fitted && pts.length) { fitted = true; pts.length > 1 ? map.fitBounds(pts, { padding: [40, 40], maxZoom: 16 }) : map.setView(pts[0], 15); }
+    }
+    function render(o) {
+      if (o.app?.color) document.documentElement.style.setProperty("--brand", o.app.color);
+      document.title = `تتبع طلبك · ${o.app?.name || ""}`;
+      const i = info(o), e = eta(o), live = ["accepted", "picked_up", "on_the_way"].includes(o.status);
+      const tot = Number(o.order_total || 0), fee = Number(o.fee || 0), per = o.kind === "personal";
+      const head = `<header><div class="logo">${o.app?.logo ? `<img src="${esc(o.app.logo)}" alt="">` : esc((o.app?.name || "ج")[0])}</div><b>${esc(o.app?.name || "")}</b></header>`;
+      root.innerHTML = head + `
+        <div class="card">
+          <div class="small muted">طلب #${o.id}${o.zone ? " · " + esc(o.zone) : ""}</div>
+          <p class="status ${i.cls || ""}">${i.t}</p>
+          ${e ? `<span class="eta">يوصلك خلال ~${e} دقيقة</span>` : ""}
+          ${i.s >= 0 ? `<div class="steps">${STEPS.map((_, k) => `<i class="${k <= i.s ? "on" : ""}"></i>`).join("")}</div><div class="steps-l">${STEPS.map((x) => `<span>${x}</span>`).join("")}</div>` : ""}
+        </div>
+`;
+      document.getElementById("rest").innerHTML = `
+        ${o.code ? `<div class="card code"><div class="small muted">كود التسليم</div><div class="n">${esc(o.code)}</div><div class="small muted">انطيه للسائق بس لما يوصلك ويسلمك الطلب</div></div>` : ""}
+        ${o.driver ? `<div class="card row"><div><div class="small muted">السائق</div><b>${esc(o.driver.name)}</b></div>${o.driver.phone ? `<a class="btn" href="tel:${esc(o.driver.phone)}">📞 اتصل</a>` : ""}</div>` : ""}
+        <div class="card"><dl>
+          ${per && o.request ? `<dt>طلبك</dt><dd>${esc(o.request)}</dd>` : ""}
+          ${o.address ? `<dt>العنوان</dt><dd>${esc(o.address)}</dd>` : ""}
+          <dt>${per ? (o.receipt ? "الفاتورة" : "الأغراض") : "الطلب"}</dt><dd>${per && !tot ? "حسب الفاتورة" : money(tot)}</dd>
+          <dt>التوصيل</dt><dd>${money(fee)}</dd>
+          <dt>المجموع</dt><dd class="total">${per && !tot ? "الفاتورة + " + money(fee) : money(tot + fee)}</dd>
+        </dl></div>
+        ${o.app?.phone ? `<div style="text-align:center"><a class="btn ghost" href="tel:${esc(o.app.phone)}">تحتاج مساعدة؟ اتصل بينا</a></div>` : ""}`;
+      const el = document.getElementById("map"), show = live || !!o.drop;
+      el.hidden = !show;
+      if (show) {
+        if (!map) {
+          map = L.map(el, { zoomControl: false, attributionControl: false }).setView(C.mapCenter, 13);
+          L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(map);
+        }
+        map.invalidateSize(); drawMap(o);
+      }
+      if (["delivered", "refused", "cancelled"].includes(o.status)) clearInterval(timer);
+    }
+    async function load() {
+      if (!/^[0-9a-f-]{36}$/i.test(token)) { root.innerHTML = `<div class="center">الرابط غلط</div>`; clearInterval(timer); return; }
+      const { data, error } = await sb.rpc("track_order", { p_token: token });
+      if (error) { if (!root.querySelector(".card") && !document.getElementById("rest").innerHTML) root.innerHTML = `<div class="center">صار خلل بالاتصال، نعيد المحاولة...</div>`; return; }
+      if (!data) { root.innerHTML = `<div class="center">الطلب غير موجود أو الرابط قديم</div>`; clearInterval(timer); return; }
+      render(data);
+    }
+    load(); timer = setInterval(load, 10000);
+  })();
+  </script>
+</body>
+</html>

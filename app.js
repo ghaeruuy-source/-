@@ -309,6 +309,22 @@ const bizInfo = (k) => BIZ[k] || (k ? { label: k, icon: "🏷" } : BIZ.restauran
 const bizLabel = (r) => { const b = bizInfo(r?.biz_type); return `${b.icon} ${b.label.replace(/^ال/, "")}`; };
 const bizTypes = () => [...Object.keys(BIZ), ...new Set((S.people || []).map((p) => p.biz_type).filter((k) => k && !BIZ[k]))];
 const isPersonal = (o) => o?.kind === "personal";
+const trackUrl = (o) => `${location.origin}${location.pathname.replace(/[^/]*$/, "")}track.html?t=${o.track_token}`;
+const waTo = (phone, text) => `https://wa.me/964${normPhone(phone).replace(/^0/, "")}?text=${encodeURIComponent(text)}`;
+const trackMsg = (o) => `هلا 👋 طلبك #${o.id} وصلنا${S.settings?.app_name ? " من " + S.settings.app_name : ""}.\nتكدر تتابع السائق على الخريطة من هنا:\n${trackUrl(o)}\n\nكود التسليم: ${o.delivery_code}\nانطيه للسائق بس لما يسلمك الطلب.`;
+async function shrinkImage(file, max = 1400) {
+  try {
+    const img = await createImageBitmap(file); const k = Math.min(1, max / Math.max(img.width, img.height));
+    const c = document.createElement("canvas"); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+    c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+    return await new Promise((r) => c.toBlob((b) => r(b || file), "image/jpeg", 0.8));
+  } catch (_) { return file; }
+}
+async function receiptUrl(path) { const { data } = await sb.storage.from("receipts").createSignedUrl(path, 600); return data?.signedUrl; }
+async function showReceipt(path) {
+  const url = await receiptUrl(path); if (!url) return toast("ما كدرنا نفتح الوصل", true);
+  modal(`<h3>🧾 الوصل</h3><img src="${esc(url)}" alt="" style="width:100%;border-radius:12px;max-height:70vh;object-fit:contain;background:#f3f3f3"><div class="row" style="margin-top:10px"><a class="btn" target="_blank" rel="noopener" href="${esc(url)}">فتح بحجم كامل</a><button class="btn ghost" data-close>سد</button></div>`);
+}
 const fromName = (o) => (isPersonal(o) ? `🛍 طلب شخصي${o.restaurant_id && S.restaurants[o.restaurant_id] ? " · " + S.restaurants[o.restaurant_id].name : ""}` : S.restaurants[o?.restaurant_id]?.name || "مطعم");
 const shopIcon = () => L.divIcon({ className: "", html: `<div class="rest-pin">🛍</div>`, iconSize: [26, 26], iconAnchor: [13, 13] });
 const restIcon = () => L.divIcon({ className: "", html: `<div class="rest-pin">🍽</div>`, iconSize: [26, 26], iconAnchor: [13, 13] });
@@ -654,11 +670,14 @@ const Restaurant = {
         <dt>المبلغ</dt><dd>${isPersonal(o) && !Number(o.order_total) ? "ثمن الأغراض" : money(o.order_total)} + ${money(o.delivery_fee)} توصيل</dd>
         ${d ? `<dt>السائق</dt><dd>${esc(d.name)} · ${tel(d.phone)}</dd>` : ""}
         <dt>الوقت</dt><dd>${compact ? dateTime(o.created_at) : time(o.created_at)}</dd>
+        ${o.receipt_total != null ? `<dt>الفاتورة</dt><dd>${money(o.receipt_total)}${o.receipt_path ? ` · <a href="#" data-act="receipt" data-path="${esc(o.receipt_path)}">🧾 شوف الوصل</a>` : ""}</dd>` : ""}
+        ${!compact && o.delivery_code && !["delivered", "refused", "cancelled"].includes(o.status) ? `<dt>كود التسليم</dt><dd><b class="num" style="letter-spacing:3px">${esc(o.delivery_code)}</b> <span class="small muted">(للزبون بس)</span></dd>` : ""}
         ${o.close_reason ? `<dt>ملاحظة</dt><dd>${esc(o.close_reason)}</dd>` : ""}
       </dl>
       ${o.status === "offered" && o.offer_expires_at ? `<div class="small muted" style="margin-top:8px" data-exp="${o.offer_expires_at}"></div>` : ""}
       ${!compact ? `<div class="row" style="margin-top:12px">
         ${d && ["accepted", "picked_up", "on_the_way"].includes(o.status) ? `<button class="btn sm dark" data-act="track" data-id="${o.id}">شوف السائق على الخريطة</button>` : ""}
+        ${o.track_token && !["delivered", "refused", "cancelled"].includes(o.status) ? (normPhone(o.customer_phone) === normPhone(S.profile.phone) ? `<a class="btn sm" target="_blank" rel="noopener" href="${trackUrl(o)}">📍 تتبع طلبك</a>` : `<a class="btn sm wa" target="_blank" rel="noopener" href="${waTo(o.customer_phone, trackMsg(o))}">💬 رابط التتبع للزبون</a>`) : ""}
         ${canCancel ? `<button class="btn sm ghost" data-act="cancel" data-id="${o.id}">إلغاء</button>` : ""}
       </div>` : ""}
     </div>`;
@@ -696,6 +715,7 @@ const Restaurant = {
       try { await rpc("cancel_order", { oid: id, reason: "ألغاه المطعم" }); toast("انلغى الطلب"); this.load(); } catch (err) { toast(errMsg(err), true); }
     }
     if (b.dataset.act === "track") this.openTrack(id);
+    if (b.dataset.act === "receipt") { e.preventDefault(); showReceipt(b.dataset.path); }
   },
   closePlace() {
     if (S.maps.place) { S.maps.place.remove(); S.maps.place = null; }
@@ -849,7 +869,7 @@ const Driver = {
   moneyHtml(o) {
     const fee = Number(o.delivery_fee), tot = Number(o.order_total), net = money(fee - Number(o.commission));
     if (isPersonal(o)) return `<div class="money">
-        <div><span>ثمن الأغراض</span><b>${tot ? money(tot) + " تقريباً" : "حسب الفاتورة"}</b></div>
+        <div><span>${o.receipt_total != null ? "الفاتورة" : "ثمن الأغراض"}</span><b>${tot ? money(tot) + (o.receipt_total != null ? "" : " تقريباً") : "حسب الفاتورة"}</b></div>
         <div class="hl"><span>تستلم من الزبون</span><b>${tot ? money(tot + fee) : "الفاتورة + " + money(fee)}</b></div>
         <div><span>ربحك</span><b>${net}</b></div></div>`;
     return `<div class="money">
@@ -932,6 +952,9 @@ const Driver = {
       if (b.dataset.act === "accept") { b.disabled = true; await rpc("driver_respond", { oid: id, p_accept: true }); toast("قبلت الطلب، روح للمطعم"); await this.load(); }
       if (b.dataset.act === "decline") { b.disabled = true; await rpc("driver_respond", { oid: id, p_accept: false }); await this.load(); }
       if (b.dataset.act === "status") {
+        const o = S.orders.find((x) => x.id === id);
+        if (b.dataset.st === "picked_up" && isPersonal(o)) return this.receiptModal(o);
+        if (b.dataset.st === "delivered" && S.settings?.require_delivery_code) return this.codeModal(o);
         if (b.dataset.st === "delivered" && !confirm("متأكد توصّل الطلب واستلمت المبلغ؟")) return;
         b.disabled = true; await rpc("driver_update_status", { oid: id, p_status: b.dataset.st }); await this.load();
       }
@@ -942,6 +965,53 @@ const Driver = {
         toast("تم تسجيل الرفض، رجّع الطلب للمطعم"); await this.load();
       }
     } catch (err) { toast(errMsg(err), true); this.load(); }
+  },
+  receiptModal(o) {
+    modal(`<h3>🧾 فاتورة طلب #${o.id}</h3>
+      <p class="small muted" style="margin-top:-6px">اكتب المبلغ اللي دفعته بالضبط وصوّر الوصل. الزبون يشوف المبلغ قبل لا توصله.</p>
+      <form id="rcForm">
+        <div class="field"><label>المبلغ اللي دفعته</label><input name="amount" inputmode="numeric" class="ltr" required placeholder="مثلاً 7500" style="font-size:20px"></div>
+        <div class="field"><label>صورة الوصل</label><input type="file" name="photo" accept="image/*" capture="environment">
+          <div class="small muted" style="margin-top:4px">إذا ماكو وصل (فرن مثلاً)، صوّر الأغراض.</div></div>
+        <div id="rcSum" class="alert info" hidden></div>
+        <button class="btn primary block big" style="margin-top:10px">حفظ وانطلقت للزبون</button>
+        <button type="button" class="btn ghost block" data-close style="margin-top:6px">رجوع</button>
+      </form>`, (bg, close) => {
+      const f = bg.querySelector("#rcForm");
+      f.amount.oninput = () => { const t = toNum(f.amount.value), box = bg.querySelector("#rcSum"); box.hidden = !t; box.innerHTML = `تستلم من الزبون: <b>${money(t + Number(o.delivery_fee))}</b>`; };
+      f.onsubmit = async (e) => {
+        e.preventDefault();
+        const amount = toNum(f.amount.value); if (!amount) return toast("اكتب المبلغ", true);
+        const file = f.photo.files[0];
+        if (!file && !confirm("ما صورت الوصل. تكمل بدون صورة؟")) return;
+        const btn = f.querySelector("button.big"); btn.disabled = true; btn.textContent = "جاري الحفظ...";
+        try {
+          let path = null;
+          if (file) {
+            const blob = await shrinkImage(file);
+            path = `${S.profile.id}/${o.id}-${Date.now()}.jpg`;
+            const { error } = await sb.storage.from("receipts").upload(path, blob, { contentType: "image/jpeg" });
+            if (error) throw error;
+          }
+          await rpc("driver_set_receipt", { oid: o.id, p_amount: amount, p_path: path });
+          toast("انحفظت الفاتورة ✓ روح للزبون"); close(); this.load();
+        } catch (err) { toast(errMsg(err), true); btn.disabled = false; btn.textContent = "حفظ وانطلقت للزبون"; }
+      };
+    });
+  },
+  codeModal(o) {
+    modal(`<h3>كود التسليم · طلب #${o.id}</h3>
+      <p class="small muted" style="margin-top:-6px">اطلب من الزبون الكود (4 أرقام). يلكاه برابط التتبع اللي وصله.</p>
+      <form id="cdForm"><input name="code" inputmode="numeric" maxlength="4" autocomplete="one-time-code" class="ltr" required placeholder="• • • •" style="font-size:32px;text-align:center;letter-spacing:12px">
+        <button class="btn ok block big" style="margin-top:12px">توصّل ✓ استلمت المبلغ</button>
+        <button type="button" class="btn ghost block" data-close style="margin-top:6px">رجوع</button></form>`, (bg, close) => {
+      const f = bg.querySelector("#cdForm"); setTimeout(() => f.code.focus(), 50);
+      f.onsubmit = async (e) => {
+        e.preventDefault(); const btn = f.querySelector("button.big"); btn.disabled = true;
+        try { await rpc("driver_update_status", { oid: o.id, p_status: "delivered", p_note: String(f.code.value).replace(/[٠-٩]/g, (c) => "٠١٢٣٤٥٦٧٨٩".indexOf(c)).trim() }); toast("توصّل ✓ بالعافية"); close(); this.load(); }
+        catch (err) { toast(errMsg(err), true); btn.disabled = false; f.code.select(); }
+      };
+    });
   },
   startGps() {
     if (!navigator.geolocation || S.watchId != null) return;
@@ -1008,6 +1078,7 @@ const Admin = {
     every(1000, () => document.querySelectorAll("[data-exp]").forEach((el) => {
       const s = Math.max(0, Math.round((new Date(el.dataset.exp) - Date.now()) / 1000)); el.textContent = `${s} ث`;
     }));
+    every(5000, () => this.checkStuck());
   },
   async load() {
     const since = new Date(Date.now() - 864e5).toISOString();
@@ -1215,10 +1286,25 @@ const Admin = {
       <div class="small muted">${money(o.order_total)} + ${money(o.delivery_fee)} · ${time(o.created_at)}${o.status === "offered" && (o.offered_driver_ids || []).length ? ` · معروض على: <b>${o.offered_driver_ids.map((x) => esc(S.drivers[x]?.name || "سائق")).join("، ")}</b>` : d ? ` · ${o.status === "offered" ? "معروض على" : "السائق"}: <b>${esc(d.name)}</b>` : ""}${o.status === "offered" ? ` · <span data-exp="${o.offer_expires_at}"></span>` : ""}</div>
       <div class="row" style="margin-top:6px">
         ${waiting ? `<button class="btn sm dark" data-act="assign" data-id="${o.id}">إرسال لسائق</button>` : ""}
+        ${o.track_token ? `<button class="btn sm ghost" data-act="trackLink" data-id="${o.id}" title="رابط التتبع">🔗 تتبع</button>` : ""}
+        ${o.receipt_path ? `<button class="btn sm ghost" data-act="receipt" data-path="${esc(o.receipt_path)}">🧾 ${money(o.receipt_total)}</button>` : ""}
         ${o.driver_id ? `<button class="btn sm ghost" data-act="forceDeliver" data-id="${o.id}">تأشير توصّل</button>` : ""}
         <button class="btn sm ghost" data-act="cancelOrder" data-id="${o.id}">إلغاء</button>
       </div>
     </div>`;
+  },
+  checkStuck() {
+    if (!canTab("live") && !canTab("orders")) return;
+    const lim = Number(S.settings?.stuck_alert_min || 3) * 60000, now = Date.now();
+    S.stuckMuted ||= {};
+    const stuck = S.orders.filter((o) => ["searching", "offered"].includes(o.status) && now - new Date(o.created_at) > lim);
+    let bar = $("#stuckBar");
+    if (!stuck.length) { bar?.remove(); return; }
+    if (!bar) { bar = document.createElement("div"); bar.id = "stuckBar"; bar.className = "stuck-bar"; document.body.appendChild(bar); bar.addEventListener("click", (e) => this.onClick(e)); }
+    bar.innerHTML = `<div class="stuck-in"><b>⚠️ ${stuck.length === 1 ? "طلب عالق" : stuck.length + " طلبات عالقة"} بدون سائق</b>
+      ${stuck.slice(0, 3).map((o) => `<span class="stuck-o">#${o.id} · ${esc(fromName(o))} · ${Math.floor((now - new Date(o.created_at)) / 60000)} د
+        <button class="btn sm" data-act="assign" data-id="${o.id}">حوّله لسائق</button>${S.stuckMuted[o.id] ? "" : `<button class="btn sm ghost" data-act="muteStuck" data-id="${o.id}" title="سكت الصوت">🔕</button>`}</span>`).join("")}</div>`;
+    if (stuck.some((o) => !S.stuckMuted[o.id]) && (S.lastStuckAlarm || 0) < now - 15000) { S.lastStuckAlarm = now; alarm(); }
   },
   personalModal() {
     const zones = S.zones.filter((z) => z.active);
@@ -1677,6 +1763,36 @@ const Admin = {
     };
   },
   // ----- reports -----
+  async renderDriverStats() {
+    const { data, error } = await rpc0("driver_stats", { p_from: S.rep.from, p_to: S.rep.to });
+    if (error) { $("#repOut").innerHTML = `<div class="alert bad">${esc(error.message)}</div>`; return; }
+    const rows = (data || []).filter((d) => d.offers || d.delivered);
+    const pct = (a, b) => (b ? Math.round((a / b) * 100) : null);
+    const best = rows.filter((d) => d.delivered >= 3).sort((a, b) => (a.avg_min ?? 999) - (b.avg_min ?? 999))[0];
+    const badge = (v, good, bad, rev) => { if (v == null) return `<span class="muted">—</span>`; const ok = rev ? v <= good : v >= good, no = rev ? v >= bad : v <= bad; return `<b class="${ok ? "t-good" : no ? "t-bad" : ""}">${v}</b>`; };
+    $("#repOut").innerHTML = `
+      <div class="spread" style="margin:16px 0 8px"><h2 style="margin:0">أداء السواق · من <span class="num">${S.rep.from}</span> إلى <span class="num">${S.rep.to}</span></h2></div>
+      ${best ? `<div class="alert info">🏆 الأسرع: <b>${esc(best.name)}</b>، معدل التوصيل ${best.avg_min} دقيقة من القبول.</div>` : ""}
+      <div class="card table-wrap" style="padding:0;margin-top:10px"><table><thead><tr>
+        <th>السائق</th><th>عروض</th><th>قبل</th><th>رفض</th><th>فاتته</th><th>نسبة القبول</th><th>توصّل</th><th>رفض الزبون</th><th>وقت الاستلام</th><th>وقت التوصيل</th><th>ربحه</th></tr></thead><tbody>
+      ${rows.map((d) => { const acc = pct(d.accepted, d.offers); return `<tr><td><i class="cdot" style="background:${driverColor(d.id)}"></i><b>${esc(d.name)}</b></td>
+        <td class="num">${d.offers}</td><td class="num">${d.accepted}</td><td class="num">${d.declined}</td><td class="num">${d.expired}</td>
+        <td class="num">${acc == null ? "—" : badge(acc, 70, 40) + "%"}</td><td class="num"><b>${d.delivered}</b></td><td class="num">${d.refused}</td>
+        <td class="num">${d.avg_pick_min == null ? "—" : badge(Number(d.avg_pick_min), 10, 20, true) + " د"}</td><td class="num">${d.avg_min == null ? "—" : badge(Number(d.avg_min), 25, 45, true) + " د"}</td>
+        <td>${money(d.earned)}</td></tr>`; }).join("") || `<tr><td colspan="11" class="empty">ماكو بيانات بهالفترة</td></tr>`}
+      </tbody></table></div>
+      <p class="small muted">نسبة القبول = قبل ÷ كل العروض. "فاتته" = العرض خلص وقته وهو ما رد. الأوقات بالدقايق من لحظة القبول. الأخضر زين، والأحمر يحتاج متابعة.</p>`;
+  },
+  async renderDailyReports() {
+    const { data, error } = await sb.from("daily_reports").select("*").gte("day", S.rep.from).lte("day", S.rep.to).order("day", { ascending: false });
+    if (error) { $("#repOut").innerHTML = `<div class="alert bad">${esc(error.message)}</div>`; return; }
+    $("#repOut").innerHTML = `<div class="spread" style="margin:16px 0 8px"><h2 style="margin:0">التقارير اليومية</h2></div>
+      <p class="small muted">كل ليلة الساعة 11:50 يوصل لحسابات الإدارة إشعار بملخص اليوم وينحفظ هنا.</p>
+      <div class="card table-wrap" style="padding:0"><table><thead><tr><th>اليوم</th><th>الطلبات</th><th>توصّل</th><th>رفض</th><th>ملغي</th><th>شخصي</th><th>العمولة</th><th>ديون السواق</th><th>أكثر مطعم</th><th>أكثر سايق</th></tr></thead><tbody>
+      ${(data || []).map(({ day, data: j }) => `<tr><td class="num">${day}</td><td class="num">${j.orders}</td><td class="num">${j.delivered}</td><td class="num">${j.refused}</td><td class="num">${j.cancelled}</td><td class="num">${j.personal}</td>
+        <td>${money(j.commission)}</td><td>${money(j.debt)}</td><td>${esc(j.top_restaurant || "—")}</td><td>${esc(j.top_driver || "—")}</td></tr>`).join("") || `<tr><td colspan="10" class="empty">ماكو تقارير بهالفترة بعد. أول تقرير يطلع الليلة.</td></tr>`}
+      </tbody></table></div>`;
+  },
   async renderReports() {
     const m = $("#amain");
     const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -1690,7 +1806,7 @@ const Admin = {
     };
     S.rep ||= { key: "month", from: presets.month[1], to: presets.month[2] };
     S.repView ||= "profit";
-    m.innerHTML = `<div class="seg no-print" style="margin-bottom:12px"><button data-rv="profit" class="${S.repView === "profit" ? "on" : ""}">📈 تقرير الأرباح</button><button data-rv="vouchers" class="${S.repView === "vouchers" ? "on" : ""}">🧾 تقرير السندات</button></div>
+    m.innerHTML = `<div class="seg no-print" style="margin-bottom:12px"><button data-rv="profit" class="${S.repView === "profit" ? "on" : ""}">📈 تقرير الأرباح</button><button data-rv="vouchers" class="${S.repView === "vouchers" ? "on" : ""}">🧾 تقرير السندات</button><button data-rv="drivers" class="${S.repView === "drivers" ? "on" : ""}">🛵 أداء السواق</button><button data-rv="daily" class="${S.repView === "daily" ? "on" : ""}">📊 التقارير اليومية</button></div>
       <div class="card no-print"><div class="row">
         ${Object.entries(presets).map(([k, [l]]) => `<button class="btn sm ${S.rep.key === k ? "dark" : "ghost"}" data-preset="${k}">${l}</button>`).join("")}
         <span class="row date-range"><input type="date" id="rFrom" value="${S.rep.from}" style="width:auto"> إلى <input type="date" id="rTo" value="${S.rep.to}" style="width:auto"><button class="btn sm dark" id="rGo">عرض</button></span>
@@ -1699,6 +1815,8 @@ const Admin = {
     $("#rGo").onclick = () => { S.rep = { key: "custom", from: $("#rFrom").value, to: $("#rTo").value }; this.renderReports(); };
     m.querySelectorAll("[data-rv]").forEach((b) => (b.onclick = () => { S.repView = b.dataset.rv; this.renderReports(); }));
     if (S.repView === "vouchers") return this.renderVoucherReport();
+    if (S.repView === "drivers") return this.renderDriverStats();
+    if (S.repView === "daily") return this.renderDailyReports();
     const [{ data: R, error }, { data: T }] = await Promise.all([rpc0("profit_report", { p_from: S.rep.from, p_to: S.rep.to }), rpc0("finance_totals")]);
     if (error) { $("#repOut").innerHTML = `<div class="alert bad">${esc(error.message)}</div>`; return; }
     const net = Number(R.commission) + Number(R.other_income || 0) - Number(R.salaries) - Number(R.expenses);
@@ -2139,6 +2257,10 @@ const Admin = {
       <div class="field"><label>الطلب يوصل لكم سائق سوية (الأقرب)</label><input name="offer_batch" inputmode="numeric" class="ltr" value="${s.offer_batch ?? 3}"></div>
       <div class="field"><label>كم طلب بنفس الوقت للسائق</label><input name="max_active_per_driver" inputmode="numeric" class="ltr" value="${s.max_active_per_driver}"></div>
       <div class="field"><label>السائق يعتبر غير متصل إذا موقعه ما تحدث خلال (دقيقة)</label><input name="location_stale_min" inputmode="numeric" class="ltr" value="${s.location_stale_min}"></div>
+      <div class="field"><label>نبهني إذا طلب بقى بدون سائق أكثر من (دقيقة)</label><input name="stuck_alert_min" inputmode="numeric" class="ltr" value="${s.stuck_alert_min ?? 3}"></div>
+      <div class="section-title">التسليم</div>
+      <label class="check-row" style="display:flex;gap:10px;align-items:flex-start"><input type="checkbox" name="require_delivery_code" ${s.require_delivery_code ? "checked" : ""} style="width:auto;margin-top:4px">
+        <span><b>السائق لازم ياخذ كود التسليم من الزبون</b><br><span class="small muted">الطلب ما يتأشر "توصّل" إلا بالكود (4 أرقام). الزبون يلكاه برابط التتبع، فلازم المطاعم تدز الرابط للزبون من زر "💬 رابط التتبع للزبون".</span></span></label>
       <button class="btn primary block big">حفظ</button>
       <p class="small muted">العمولة الجديدة تنطبق على الطلبات الجديدة فقط.</p>
     </form>`;
@@ -2165,7 +2287,9 @@ const Admin = {
         offer_timeout_sec: Math.max(10, toNum(f.offer_timeout_sec.value) || 30),
         offer_batch: Math.min(20, Math.max(1, toNum(f.offer_batch.value) || 3)),
         max_active_per_driver: Math.max(1, toNum(f.max_active_per_driver.value) || 1),
-        location_stale_min: Math.max(2, toNum(f.location_stale_min.value) || 10), updated_at: new Date().toISOString(),
+        location_stale_min: Math.max(2, toNum(f.location_stale_min.value) || 10),
+        stuck_alert_min: Math.max(1, toNum(f.stuck_alert_min.value) || 3), require_delivery_code: f.require_delivery_code.checked,
+        updated_at: new Date().toISOString(),
       };
       const { data, error } = await sb.from("settings").update(v).eq("id", 1).select().single();
       if (error) return toast(error.message, true);
@@ -2181,6 +2305,15 @@ const Admin = {
     try {
       if (act === "assign") return this.assignModal(Number(id));
       if (act === "personalOrder") return this.personalModal();
+      if (act === "receipt") return showReceipt(b.dataset.path);
+      if (act === "muteStuck") { (S.stuckMuted ||= {})[id] = true; return this.checkStuck(); }
+      if (act === "trackLink") {
+        const o = S.orders.find((x) => x.id === Number(id)); if (!o) return;
+        return modal(`<h3>رابط تتبع طلب #${o.id}</h3><input class="ltr" readonly value="${esc(trackUrl(o))}" onclick="this.select()">
+          <p class="small muted">كود التسليم: <b class="num" style="letter-spacing:3px">${esc(o.delivery_code)}</b></p>
+          <div class="row" style="margin-top:10px"><a class="btn wa" target="_blank" rel="noopener" href="${waTo(o.customer_phone, trackMsg(o))}">💬 دزه للزبون واتساب</a>
+          <a class="btn" target="_blank" rel="noopener" href="${trackUrl(o)}">فتح</a><button class="btn ghost" data-close>سد</button></div>`);
+      }
       if (act === "cancelOrder") { if (!confirm(`إلغاء طلب #${id}؟`)) return; await rpc("cancel_order", { oid: Number(id), reason: "ألغته الإدارة" }); toast("انلغى"); }
       if (act === "forceDeliver") { if (!confirm(`تأشير طلب #${id} كـ توصّل؟ (تنحسب العمولة على السائق)`)) return; await rpc("driver_update_status", { oid: Number(id), p_status: "delivered" }); toast("تم"); }
       if (act === "toggleActive") {
