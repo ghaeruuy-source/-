@@ -125,3 +125,8 @@ end $$;
 -- daily_report_push: execute removed from public, anon, authenticated (cron only)
 
 select cron.schedule('daily-report', '50 20 * * *', 'select public.daily_report_push()');
+
+-- driver_update_status: when settings.require_delivery_code is on, a driver must pass the
+-- order's delivery_code as p_note to mark it delivered (admins bypass). Applied as migration "delivery_code_check".
+-- storage bucket "receipts" (private, 8MB, images) with policies receipts_insert (own folder) and
+-- receipts_read (own folder, admins, or the restaurant of the order). Applied as migration "receipts_bucket".
