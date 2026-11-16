@@ -312,6 +312,34 @@ const isPersonal = (o) => o?.kind === "personal";
 const trackUrl = (o) => `${location.origin}${location.pathname.replace(/[^/]*$/, "")}track.html?t=${o.track_token}`;
 const waTo = (phone, text) => `https://wa.me/964${normPhone(phone).replace(/^0/, "")}?text=${encodeURIComponent(text)}`;
 const trackMsg = (o) => `هلا 👋 طلبك #${o.id} وصلنا${S.settings?.app_name ? " من " + S.settings.app_name : ""}.\nتكدر تتابع السائق على الخريطة من هنا:\n${trackUrl(o)}\n\nكود التسليم: ${o.delivery_code}\nانطيه للسائق بس لما يسلمك الطلب.`;
+// full-screen zone picker with search (restaurant order form)
+function zonePicker(current, onPick) {
+  const norm = (t) => String(t || "").replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي").replace(/\s+/g, " ").trim();
+  const zones = S.zones.filter((z) => z.active).sort((a, b) => a.name.localeCompare(b.name, "ar"));
+  const el = document.createElement("div"); el.className = "zp-sheet";
+  el.innerHTML = `<div class="zp-top"><button type="button" class="btn sm ghost" data-zp-close>✕</button><b>اختار المنطقة</b><span class="small muted" id="zpCount">${zones.length} منطقة</span></div>
+    <div class="zp-search"><input type="search" id="zpQ" placeholder="🔍 دوّر على المنطقة..." autocomplete="off"></div>
+    <div class="zp-list" id="zpList"></div>`;
+  document.body.appendChild(el); document.body.style.overflow = "hidden";
+  const close = () => { el.remove(); document.body.style.overflow = ""; window.removeEventListener("popstate", close); };
+  history.pushState({ zp: 1 }, ""); window.addEventListener("popstate", close);
+  const draw = () => {
+    const q = norm($("#zpQ", el).value);
+    const list = q ? zones.filter((z) => norm(z.name).includes(q)).sort((a, b) => norm(a.name).indexOf(q) - norm(b.name).indexOf(q)) : zones;
+    $("#zpCount", el).textContent = `${list.length} منطقة`;
+    $("#zpList", el).innerHTML = list.map((z) => {
+      return `<button type="button" class="zp-item ${String(z.id) === String(current) ? "on" : ""}" data-zid="${z.id}"><span>${esc(z.name)}</span><span class="zp-fee">${money(z.delivery_fee)}</span></button>`; }).join("")
+      || `<div class="empty">ماكو منطقة بهالاسم</div>`;
+  };
+  draw();
+  $("#zpQ", el).oninput = draw;
+  el.addEventListener("click", (e) => {
+    if (e.target.closest("[data-zp-close]")) return history.back();
+    const b = e.target.closest("[data-zid]"); if (!b) return;
+    const z = zones.find((x) => String(x.id) === b.dataset.zid); history.back(); onPick(z);
+  });
+  setTimeout(() => $("#zpQ", el)?.focus(), 60);
+}
 async function shrinkImage(file, max = 1400) {
   try {
     const img = await createImageBitmap(file); const k = Math.min(1, max / Math.max(img.width, img.height));
@@ -552,15 +580,14 @@ const Restaurant = {
   },
   formHtml() {
     const noLoc = S.profile.lat == null, per = S.kind === "personal";
-    const zoneOpts = `<option value="">اختار المنطقة</option>${S.zones.filter((z) => z.active).map((z) => `<option value="${z.id}">${esc(z.name)} — ${Number(z.delivery_fee).toLocaleString("en-US")} د.ع</option>`).join("")}`;
+    const zoneBtn = (ph) => `<button type="button" class="zone-pick" id="zonePick"><span class="zp-ph">📍 ${ph}</span><span class="zp-arrow">‹</span></button><input type="hidden" name="zone">`;
     const seg = `<div class="seg seg-wide" id="kindSeg" style="margin-bottom:14px"><button type="button" class="${per ? "" : "on"}" data-kind="restaurant">🍽 طلب عادي</button><button type="button" class="${per ? "on" : ""}" data-kind="personal">🛍 طلب شخصي</button></div>`;
     const body = per ? `
       <div class="po-step"><div class="po-h"><span>1</span>شنو تريد؟</div>
         <textarea name="request" rows="3" required placeholder="مثلاً: 10 صمون + طبقة بيض + كارت رصيد آسيا"></textarea>
         <input name="place" placeholder="منين نشتريه؟ (اختياري) مثلاً: فرن الحلة" style="margin-top:8px"></div>
       <div class="po-step"><div class="po-h"><span>2</span>حدد مكانك</div>
-        <input type="search" id="zoneQ" placeholder="🔍 اكتب اسم منطقتك..." autocomplete="off" style="margin-bottom:6px">
-        <select name="zone" required>${zoneOpts}</select>
+        ${zoneBtn("اختار منطقتك")}
         <div class="map po-map" id="dropMap"></div>
         <div class="spread" style="margin-top:6px;gap:8px"><span class="small muted" id="dropTxt">دوس على الخريطة بمكان بيتك بالضبط</span><button type="button" class="btn sm" id="dropGps">📍 موقعي الحالي</button></div>
         <input name="address" placeholder="أقرب نقطة دالة (مثلاً: قرب جامع... / بيت رقم...)" required style="margin-top:8px"></div>
@@ -569,8 +596,7 @@ const Restaurant = {
       <div class="po-step"><div class="po-h"><span>4</span>ثمن الأغراض تقريباً <small class="muted">(اختياري)</small></div>
         <input name="total" type="text" inputmode="numeric" placeholder="إذا تعرفه، مثلاً 5000"></div>` : `
       <div class="field"><label>المنطقة</label>
-        <input type="search" id="zoneQ" placeholder="🔍 اكتب اسم المنطقة..." autocomplete="off" style="margin-bottom:6px">
-        <select name="zone" required>${zoneOpts}</select></div>
+        ${zoneBtn("اختار المنطقة")}</div>
       <div class="field"><label>مبلغ الطلب (بدون توصيل)</label><input name="total" type="text" inputmode="numeric" placeholder="مثلاً 15000" required></div>
       <div class="field"><label>رقم الزبون</label><input name="phone" type="tel" inputmode="tel" placeholder="07xx xxx xxxx" required><div id="phoneWarn"></div></div>
       <div class="field"><label>العنوان بالتفصيل</label><input name="address" placeholder="قرب... / شارع... / بيت..." required></div>
@@ -618,14 +644,11 @@ const Restaurant = {
       };
       setTimeout(() => map.invalidateSize(), 80);
     }
-    const zq = $("#zoneQ");
-    if (zq) zq.oninput = () => {
-      const q = zq.value.trim().replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي");
-      const norm = (t) => t.replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي");
-      let first = null;
-      [...f.zone.options].forEach((o) => { if (!o.value) return; const hit = !q || norm(o.textContent).includes(q); o.hidden = !hit; if (hit && !first) first = o; });
-      if (q && first && (f.zone.selectedOptions[0]?.hidden || !f.zone.value)) { f.zone.value = first.value; upd(); }
-    };
+    const zb = $("#zonePick");
+    const showZone = () => { const z = S.zones.find((x) => String(x.id) === f.zone.value);
+      zb.classList.toggle("on", !!z);
+      zb.querySelector(".zp-ph").innerHTML = z ? `<b>${esc(z.name)}</b> <span class="small muted">· توصيل ${money(z.delivery_fee)}</span>` : `📍 ${per ? "اختار منطقتك" : "اختار المنطقة"}`; };
+    zb.onclick = () => zonePicker(f.zone.value, (z) => { f.zone.value = z.id; showZone(); upd(); });
     if (!per) f.phone.onblur = async () => {
       const p = normPhone(f.phone.value); const w = $("#phoneWarn"); w.innerHTML = "";
       if (p.length < 10) return;
@@ -636,6 +659,7 @@ const Restaurant = {
     };
     f.onsubmit = async (e) => {
       e.preventDefault();
+      if (!f.zone.value) { toast("اختار المنطقة أول", true); return zb.click(); }
       const b = f.querySelector("button.big"); b.disabled = true;
       try {
         let pos = {};
